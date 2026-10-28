@@ -108,11 +108,22 @@ Invoke-RestMethod -Uri http://127.0.0.1:8000/targets/1/results
 
 A failed check (timeout, DNS failure, refused connection, certificate error, HTTP 400 or above) is still stored, with `is_up: false` and an `error_message`.
 
+`latency_ms` is the time until the response headers arrive (connection, TLS and redirects included). The page body is not downloaded. All timestamps are UTC and end in `Z`.
+
 Invalid input returns status 422 with a list of problems, for example:
 
 ```json
 {"detail": [{"field": "(request)", "message": "warning_ms must be lower than critical_ms"}]}
 ```
+
+## Running the tests
+
+```powershell
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The tests use a throwaway database and never touch the network.
 
 ## Project structure
 
@@ -125,6 +136,7 @@ app/
   errors.py        Readable validation error messages
   checker.py       HTTP check and result storage
   scheduler.py     Background scheduler (APScheduler)
+tests/                Automated tests (pytest)
   routers/
     targets.py     Target, check and results endpoints
 docs/
@@ -144,5 +156,5 @@ requirements.txt   Pinned dependencies
 
 - Ping checks are not implemented yet; a ping target returns HTTP 501 when checked.
 - Events (warning, critical, recovered) and uptime summaries are not implemented yet.
-- Timestamps are stored in UTC.
+- A refused connection can take about 3 seconds to report on Windows because the operating system retries.
 - SQLite is intended for a prototype, not heavy production load.
