@@ -12,6 +12,9 @@ from app.models import CheckResult, Target
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
+# Check types that can actually be run. Ping is added later if time allows.
+SUPPORTED_CHECK_TYPES = {"http"}
+
 
 @dataclass
 class CheckOutcome:
@@ -92,7 +95,7 @@ def perform_http_check(
 
 def run_check_and_store(db: Session, target: Target) -> CheckResult:
     """Run the check configured for the target and save the result."""
-    if target.check_type != "http":
+    if target.check_type not in SUPPORTED_CHECK_TYPES:
         raise NotImplementedError(f"Check type '{target.check_type}' is not supported yet")
     outcome = perform_http_check(target.host_or_url)
     result = CheckResult(
