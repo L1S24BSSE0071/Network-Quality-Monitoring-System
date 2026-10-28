@@ -95,6 +95,8 @@ Priority follows the project plan: **M** = Must have, **S** = Should have, **O**
 | VR-04 | The check interval must be between 10 and 3600 seconds. |
 | VR-05 | The warning threshold must be lower than the critical threshold; both must be greater than 0. |
 | VR-06 | The check type must be `http` or `ping`. |
+| VR-07 | A URL must not contain a user name or password, so credentials are never stored or shown. |
+| VR-08 | Unknown field names are rejected, so a misspelled field is reported instead of silently ignored. |
 
 ## 5. Non-functional requirements
 
@@ -121,5 +123,7 @@ Priority follows the project plan: **M** = Must have, **S** = Should have, **O**
 ## 7. Known limitations
 
 - A state change is detected only at check intervals, so very short outages between checks can be missed.
-- Timestamps are stored in UTC.
-- Ping support depends on the operating system.
+- Timestamps are stored and returned in UTC.
+- Response time is measured until the response headers arrive; the page body is not downloaded.
+- The 10-second timeout applies to each stage of a request (connect, wait for response), not to the whole check, and DNS look-ups are not covered by it.
+- Check history is not pruned automatically, so the database grows over time.- Ping support depends on the operating system.

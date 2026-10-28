@@ -84,7 +84,7 @@ When the server starts, every enabled target is checked in the background at its
 | Field | Default | Rule |
 |-------|---------|------|
 | `name` | required | Not blank, up to 100 characters |
-| `host_or_url` | required | HTTP: `http://` or `https://` URL. Ping: host name or IP address |
+| `host_or_url` | required | HTTP: `http://` or `https://` URL without a user name or password. Ping: host name or IP address. International and trailing-dot names are accepted; digits-only values must be a real IPv4 address |
 | `check_type` | `http` | `http` or `ping` (ping is not implemented yet) |
 | `interval_seconds` | 60 | 10 to 3600 |
 | `warning_ms` | 500 | Greater than 0 and lower than `critical_ms` |
@@ -110,7 +110,7 @@ A failed check (timeout, DNS failure, refused connection, certificate error, HTT
 
 `latency_ms` is the time until the response headers arrive (connection, TLS and redirects included). The page body is not downloaded. All timestamps are UTC and end in `Z`.
 
-Invalid input returns status 422 with a list of problems, for example:
+Invalid input returns status 422 with a list of problems (unknown or misspelled field names are rejected too), for example:
 
 ```json
 {"detail": [{"field": "(request)", "message": "warning_ms must be lower than critical_ms"}]}

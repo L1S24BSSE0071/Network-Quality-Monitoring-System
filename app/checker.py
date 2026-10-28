@@ -13,6 +13,10 @@ from app.models import CheckResult, Target
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
+# Identifies the monitor to the sites it checks. Some servers reject requests that carry
+# a generic library name, which would be reported as a false outage.
+USER_AGENT = "NetworkQualityMonitor/0.1 (+https://github.com/L1S24BSSE0071/Network-Quality-Monitoring-System)"
+
 # Check types that can actually be run. Ping is added later if time allows.
 SUPPORTED_CHECK_TYPES = {"http"}
 
@@ -76,6 +80,7 @@ def perform_http_check(
             follow_redirects=True,
             transport=transport,
             verify=_SSL_CONTEXT,
+            headers={"User-Agent": USER_AGENT},
         ) as client:
             # Start the timer after the client is built so set-up work is not counted.
             start = time.perf_counter()

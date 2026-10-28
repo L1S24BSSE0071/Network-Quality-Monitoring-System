@@ -121,3 +121,51 @@ def test_delete_removes_history_and_events_but_not_other_targets(client, make_ta
     with database.SessionLocal() as db:
         assert [r.target_id for r in db.query(CheckResult)] == [kept["id"]]
         assert [e.target_id for e in db.query(Event)] == [kept["id"]]
+
+
+@pytest.mark.parametrize(
+    "host_or_url",
+    ["http://[::1]:8000/", "http://m\u00fcnchen.de", "http://example.com./", "HTTP://EXAMPLE.COM", "http://127.0.0.1:8080"],
+)
+def test_valid_hosts_are_accepted(client, host_or_url):
+    assert client.post("/targets", json={**VALID, "host_or_url": host_or_url, "enabled": False}).status_code == 201
+
+
+@pytest.mark.parametrize(
+    "host_or_url",
+    [
+        "http://256.1.1.1",
+        "http://999.999.999.999/",
+        "http://1.2.3",
+        "http://user:pass@example.com",
+        "http://user@example.com",
+        "http://-bad.example.com",
+        "http://exa mple.com",
+    ],
+)
+def test_invalid_hosts_are_rejected(client, host_or_url):
+    assert client.post("/targets", json={**VALID, "host_or_url": host_or_url}).status_code == 422
+
+
+def test_ping_target_accepts_ips_and_rejects_bad_ones(client):
+    ok = {**VALID, "check_type": "ping", "enabled": False}
+    assert client.post("/targets", json={**ok, "host_or_url": "8.8.8.8"}).status_code == 201
+    assert client.post("/targets", json={**ok, "host_or_url": "::1"}).status_code == 201
+    assert client.post("/targets", json={**ok, "host_or_url": "256.256.256.256"}).status_code == 422
+
+
+def test_unknown_fields_are_rejected_on_create_and_edit(client, make_target):
+    response = client.post("/targets", json={**VALID, "nmae": "typo"})
+    assert response.status_code == 422
+    assert {"field": "nmae", "message": "Unknown field"} in response.json()["detail"]
+    assert client.get("/targets").json() == []
+
+    target = make_target()
+    response = client.patch(f"/targets/{target['id']}", json={"interval": 30})
+    assert response.status_code == 422
+    assert client.get(f"/targets/{target['id']}").json()["interval_seconds"] == 60
+
+
+def test_credentials_in_url_have_a_clear_message(client):
+    body = client.post("/targets", json={**VALID, "host_or_url": "http://user:pass@example.com"}).json()
+    assert body["detail"] == [{"field": "(request)", "message": "URL must not contain a user name or password"}]

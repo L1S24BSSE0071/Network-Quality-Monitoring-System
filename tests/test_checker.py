@@ -148,3 +148,14 @@ def test_target_deleted_during_a_check_leaves_no_orphan(client, make_target, mon
                            checker.CheckOutcome(is_up=True, latency_ms=1.0, http_status=200))[1],
     )
     assert client.post(f"/targets/{target2['id']}/check").status_code == 404
+
+
+def test_user_agent_identifies_the_monitor():
+    seen = {}
+
+    def handler(request):
+        seen["agent"] = request.headers["user-agent"]
+        return httpx.Response(200)
+
+    check(handler)
+    assert seen["agent"].startswith("NetworkQualityMonitor/")
