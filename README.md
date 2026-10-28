@@ -2,7 +2,7 @@
 
 A small monitoring system that checks whether chosen websites and servers are reachable, records how fast they respond, and (in later weeks) raises warning and critical events when thresholds are crossed. Built with Python, FastAPI and SQLite.
 
-> **Status: Week 1 complete (foundation and data model).** Targets can be managed through the API and a check can be run by hand and stored. Scheduled checks, alerting and the dashboard are planned for Weeks 2 and 3.
+> **Status: Week 1 complete (foundation and data model); Week 2 in progress.** Targets can be managed through the API, checks run automatically in the background and results are stored. Alerting events, summaries and the dashboard are still to come.
 
 ## Authorization and scope
 
@@ -15,7 +15,7 @@ Only your own systems and publicly available websites should be monitored. Every
 | Add, list, edit and delete targets with input validation | Done |
 | HTTP check with timeout, response-time measurement and error handling | Done |
 | Manual check on demand, stored in the database | Done |
-| Scheduled background checks | Week 2 |
+| Scheduled background checks at each target's own interval | Done |
 | Warning / critical / recovery events | Week 2 |
 | Uptime, history and summary endpoints | Week 2 |
 | Web dashboard with latency chart | Week 3 |
@@ -50,6 +50,21 @@ python -m uvicorn app.main:app --reload
 - Health check: http://127.0.0.1:8000/health
 
 The SQLite database file `monitoring.db` is created automatically in the folder you start the server from.
+
+## Scheduled checking
+
+When the server starts, every enabled target is checked in the background at its own `interval_seconds`, and each result is stored in `check_results`. The first check runs immediately.
+
+- Adding, editing, enabling, disabling or deleting a target through the API updates the schedule straight away (an added or edited target is checked immediately).
+- Checks never overlap for the same target and run in separate threads, so a slow target does not block the API or other targets.
+- A failing target cannot stop the scheduler; the failure is stored as a result with an error message.
+- Targets with an unsupported check type (ping) are not scheduled.
+
+## Configuration
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `NQMS_DATABASE_URL` (environment variable) | `sqlite:///./monitoring.db` | Database location |
 
 ## API overview
 
@@ -109,6 +124,7 @@ app/
   schemas.py       Input validation rules and response shapes
   errors.py        Readable validation error messages
   checker.py       HTTP check and result storage
+  scheduler.py     Background scheduler (APScheduler)
   routers/
     targets.py     Target, check and results endpoints
 docs/
@@ -127,6 +143,6 @@ requirements.txt   Pinned dependencies
 ## Known limitations
 
 - Ping checks are not implemented yet; a ping target returns HTTP 501 when checked.
-- Checks run only when triggered by hand until the scheduler is added in Week 2.
+- Events (warning, critical, recovered) and uptime summaries are not implemented yet.
 - Timestamps are stored in UTC.
 - SQLite is intended for a prototype, not heavy production load.

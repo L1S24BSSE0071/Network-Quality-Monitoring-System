@@ -1,9 +1,10 @@
-﻿"""API endpoints for managing monitoring targets."""
+"""API endpoints for managing monitoring targets."""
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import scheduler
 from app.checker import run_check_and_store
 from app.database import get_db
 from app.errors import format_errors
@@ -27,6 +28,7 @@ def create_target(payload: TargetCreate, db: Session = Depends(get_db)):
     db.add(target)
     db.commit()
     db.refresh(target)
+    scheduler.sync_target(target)  # start checking it in the background
     return target
 
 
@@ -63,6 +65,7 @@ def update_target(target_id: int, payload: TargetUpdate, db: Session = Depends(g
         setattr(target, field, value)
     db.commit()
     db.refresh(target)
+    scheduler.sync_target(target)  # apply a new interval, enable/disable, etc.
     return target
 
 
@@ -72,7 +75,9 @@ def delete_target(target_id: int, db: Session = Depends(get_db)):
     target = _get_target_or_404(target_id, db)
     db.delete(target)
     db.commit()
+    scheduler.remove_target(target_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
 
 @router.post("/{target_id}/check", response_model=CheckResultRead, status_code=status.HTTP_201_CREATED)
 def run_manual_check(target_id: int, db: Session = Depends(get_db)):

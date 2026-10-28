@@ -40,7 +40,7 @@ flowchart LR
 | Data layer | `app/database.py`, `app/models.py` | SQLite connection and ORM tables | Built (Week 1) |
 | Validation | `app/schemas.py`, `app/errors.py` | Input rules and response shapes | Built (Week 1) |
 | Checker | `app/checker.py` | HTTP check with timeout and error handling; stores a result | Built (Week 1) |
-| Scheduler | planned | Runs checks in the background per target interval | Week 2 |
+| Scheduler | `app/scheduler.py` | Runs checks in the background per target interval; follows target add, edit and delete | Built (Week 2) |
 | Threshold evaluator | planned | Compares latency to thresholds and creates events on state change | Week 2 |
 | Dashboard | planned | Status, history chart, forms, events, report export | Week 3 |
 
