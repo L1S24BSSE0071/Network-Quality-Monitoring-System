@@ -1,13 +1,14 @@
-"""API endpoints for managing monitoring targets."""
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+﻿"""API endpoints for managing monitoring targets."""
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.checker import run_check_and_store
 from app.database import get_db
 from app.errors import format_errors
-from app.models import Target
-from app.schemas import TargetCreate, TargetRead, TargetUpdate
+from app.models import CheckResult, Target
+from app.schemas import CheckResultRead, TargetCreate, TargetRead, TargetUpdate
 
 router = APIRouter(prefix="/targets", tags=["targets"])
 
@@ -72,3 +73,29 @@ def delete_target(target_id: int, db: Session = Depends(get_db)):
     db.delete(target)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+@router.post("/{target_id}/check", response_model=CheckResultRead, status_code=status.HTTP_201_CREATED)
+def run_manual_check(target_id: int, db: Session = Depends(get_db)):
+    """Run one check on the target right now and store the result.
+
+    A failed check (timeout, DNS error...) is still a valid result: it is stored
+    with is_up=false and an error_message, and returned with status 201.
+    """
+    target = _get_target_or_404(target_id, db)
+    try:
+        return run_check_and_store(db, target)
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc))
+
+
+@router.get("/{target_id}/results", response_model=list[CheckResultRead])
+def list_results(target_id: int, limit: int = Query(50, ge=1, le=1000), db: Session = Depends(get_db)):
+    """Most recent check results for a target, newest first."""
+    _get_target_or_404(target_id, db)
+    query = (
+        select(CheckResult)
+        .where(CheckResult.target_id == target_id)
+        .order_by(CheckResult.checked_at.desc(), CheckResult.id.desc())
+        .limit(limit)
+    )
+    return db.scalars(query).all()
