@@ -18,15 +18,31 @@ _HOSTNAME_RE = re.compile(
 )
 
 
+_NUMERIC_HOST_RE = re.compile(r"^[0-9.]+$")
+
+
 def _is_valid_host(host: str) -> bool:
-    """True if host is a valid hostname or IP address (no scheme, port or path)."""
+    """True if host is a valid hostname or IP address (no scheme, port or path).
+
+    Accepts international names (converted to their ASCII form) and a trailing dot.
+    A name made only of digits and dots must be a real IPv4 address, so values such as
+    256.1.1.1 are rejected instead of being treated as a host name.
+    """
     if not host:
         return False
     try:
         ipaddress.ip_address(host)
         return True
     except ValueError:
-        return bool(_HOSTNAME_RE.match(host))
+        pass
+    if _NUMERIC_HOST_RE.match(host):
+        return False
+    host = host.removesuffix(".")  # fully qualified name with a trailing dot
+    try:
+        host = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return False
+    return bool(_HOSTNAME_RE.match(host))
 
 
 def validate_host_or_url(value: str, check_type: str) -> str:
@@ -42,6 +58,8 @@ def validate_host_or_url(value: str, check_type: str) -> str:
             raise ValueError("URL has an invalid port")
         if not hostname or not _is_valid_host(hostname):
             raise ValueError("URL does not contain a valid host name")
+        if parsed.username or parsed.password:
+            raise ValueError("URL must not contain a user name or password")
     else:  # ping
         if not _is_valid_host(value):
             raise ValueError("Ping target must be a host name or IP address (no http://, port or path)")
@@ -78,6 +96,8 @@ class TargetBase(BaseModel):
 class TargetCreate(TargetBase):
     """Body for creating a target; all cross-field rules are checked here."""
 
+    model_config = ConfigDict(extra="forbid")  # a misspelled field is an error, not ignored
+
     @model_validator(mode="after")
     def check_rules(self):
         validate_host_or_url(self.host_or_url, self.check_type)
@@ -91,6 +111,8 @@ class TargetUpdate(BaseModel):
     Rules that depend on the stored values (e.g. only warning_ms is sent) are
     re-checked against the merged target in the API layer.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     host_or_url: Optional[str] = Field(default=None, min_length=1, max_length=2048)

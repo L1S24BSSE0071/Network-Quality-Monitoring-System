@@ -29,6 +29,8 @@ def _friendly_message(err: dict) -> str:
         return "Must be true or false"
     if kind in ("string_type", "string_sub_type"):
         return "Must be text"
+    if kind == "extra_forbidden":
+        return "Unknown field"
     if kind == "json_invalid":
         return "Request body is not valid JSON"
     message = err.get("msg", "Invalid value")
