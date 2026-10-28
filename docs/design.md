@@ -113,7 +113,8 @@ erDiagram
 - **check_results**: one row per check, successful or not. A failed check has `is_up = false`, no latency, and an `error_message`. A response with status 400 or above is also `is_up = false`, but keeps its latency and `http_status`.
 - **events**: one row per state change, not per check.
 - Deleting a target deletes its check results and events (cascade).
-- `check_results.target_id`, `check_results.checked_at`, `events.target_id` and `events.occurred_at` are indexed, since history and uptime queries filter on them.
+- Composite indexes on `check_results (target_id, checked_at)` and `events (target_id, occurred_at)` serve the history and uptime queries, which filter by target and range by time.
+- Foreign keys are enforced (`PRAGMA foreign_keys=ON`) so a result can never be stored for a deleted target.
 - Timestamps are stored in UTC.
 
 ## 3. Target state model

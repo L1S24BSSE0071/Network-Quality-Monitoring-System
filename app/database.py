@@ -13,10 +13,12 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
 @event.listens_for(engine, "connect")
 def _configure_sqlite(dbapi_connection, connection_record):
-    """Allow readers and a writer at the same time and wait briefly on a locked DB."""
+    """Allow readers and a writer at the same time, wait briefly on a locked DB,
+    and enforce foreign keys (SQLite ignores them unless asked)."""
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA busy_timeout=10000")
+    cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
 
 
@@ -25,6 +27,18 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 class Base(DeclarativeBase):
     """Base class for all ORM models."""
+
+
+def init_db() -> None:
+    """Create missing tables and indexes.
+
+    create_all only creates missing tables, so indexes added in later versions are
+    created explicitly for databases that already exist.
+    """
+    Base.metadata.create_all(bind=engine)
+    for table in Base.metadata.sorted_tables:
+        for index in table.indexes:
+            index.create(bind=engine, checkfirst=True)
 
 
 def get_db():

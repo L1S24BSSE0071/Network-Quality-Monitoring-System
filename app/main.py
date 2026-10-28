@@ -8,18 +8,21 @@ from fastapi.responses import JSONResponse
 
 from app import models  # noqa: F401  (registers the tables with Base)
 from app import scheduler
-from app.database import Base, engine
+from app.database import init_db
 from app.errors import format_errors
 from app.routers import targets
 
-# Show the scheduler's messages (uvicorn only configures its own loggers).
+# Show the scheduler's messages (uvicorn only configures its own loggers), but keep
+# the libraries quiet: httpx and APScheduler would otherwise log every single check.
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s - %(message)s")
+for _noisy in ("httpx", "httpcore", "apscheduler"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Create the tables, start the background scheduler, and stop it on shutdown."""
-    Base.metadata.create_all(bind=engine)
+    init_db()
     scheduler.start()
     yield
     scheduler.shutdown()

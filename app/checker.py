@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import httpx
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import CheckResult, Target
@@ -14,6 +15,10 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 
 # Check types that can actually be run. Ping is added later if time allows.
 SUPPORTED_CHECK_TYPES = {"http"}
+
+# Loading the CA certificates takes several hundred milliseconds, so it is done once
+# and shared by every check instead of once per check. SSL contexts are thread-safe.
+_SSL_CONTEXT = httpx.create_ssl_context()
 
 
 @dataclass
@@ -55,6 +60,10 @@ def perform_http_check(
 ) -> CheckOutcome:
     """Send one GET request and measure the response time.
 
+    The response time is the time until the response headers arrive (including
+    connection set-up, TLS and any redirects). The body is not downloaded, so a
+    large page costs no bandwidth and does not distort the measurement.
+
     Never raises: every failure is returned as a CheckOutcome with is_up=False
     and an error_message. A response with status 400 or above counts as down,
     but its latency and status code are still recorded.
@@ -63,13 +72,17 @@ def perform_http_check(
     """
     try:
         with httpx.Client(
-            timeout=timeout_seconds, follow_redirects=True, transport=transport
+            timeout=timeout_seconds,
+            follow_redirects=True,
+            transport=transport,
+            verify=_SSL_CONTEXT,
         ) as client:
-            # Start the timer after the client is built: creating it loads SSL
-            # certificates, which is not part of the target's response time.
+            # Start the timer after the client is built so set-up work is not counted.
             start = time.perf_counter()
-            response = client.get(url)
-            latency_ms = round((time.perf_counter() - start) * 1000, 2)
+            with client.stream("GET", url) as response:
+                latency_ms = round((time.perf_counter() - start) * 1000, 2)
+                status_code = response.status_code
+                reason = response.reason_phrase
     except httpx.TimeoutException:
         return CheckOutcome(is_up=False, error_message=f"Timed out after {timeout_seconds:g} seconds")
     except httpx.ConnectError as exc:
@@ -83,29 +96,39 @@ def perform_http_check(
     except Exception as exc:  # last resort so a check can never crash the caller
         return CheckOutcome(is_up=False, error_message=f"Unexpected error: {type(exc).__name__}: {exc}"[:500])
 
-    if response.status_code >= 400:
+    if status_code >= 400:
         return CheckOutcome(
             is_up=False,
             latency_ms=latency_ms,
-            http_status=response.status_code,
-            error_message=f"HTTP {response.status_code} {response.reason_phrase}".strip(),
+            http_status=status_code,
+            error_message=f"HTTP {status_code} {reason}".strip(),
         )
-    return CheckOutcome(is_up=True, latency_ms=latency_ms, http_status=response.status_code)
+    return CheckOutcome(is_up=True, latency_ms=latency_ms, http_status=status_code)
 
 
-def run_check_and_store(db: Session, target: Target) -> CheckResult:
-    """Run the check configured for the target and save the result."""
+def run_check_and_store(db: Session, target: Target) -> Optional[CheckResult]:
+    """Run the check configured for the target and save the result.
+
+    Returns None if the target was deleted while the check was running, in which
+    case nothing is stored.
+    """
     if target.check_type not in SUPPORTED_CHECK_TYPES:
         raise NotImplementedError(f"Check type '{target.check_type}' is not supported yet")
+    target_id = target.id
     outcome = perform_http_check(target.host_or_url)
     result = CheckResult(
-        target_id=target.id,
+        target_id=target_id,
         is_up=outcome.is_up,
         latency_ms=outcome.latency_ms,
         http_status=outcome.http_status,
         error_message=outcome.error_message,
     )
     db.add(result)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # The foreign key failed: the target no longer exists.
+        db.rollback()
+        return None
     db.refresh(result)
     return result
