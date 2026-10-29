@@ -34,17 +34,21 @@ def run_scheduled_check(target_id: int) -> None:
     next run, and never raises, so one failing target cannot affect others.
     """
     try:
-        with database.SessionLocal() as db:
-            target = db.get(Target, target_id)
-            if target is None or not target.enabled or target.check_type not in SUPPORTED_CHECK_TYPES:
-                # Deleted, disabled, or switched to an unsupported check type since the
-                # job was scheduled: release the DB connection before taking the lock.
-                db.rollback()
-                remove_target(target_id)
-                return
-            stored = run_check_and_store(db, target, require_enabled=True)
-        if stored is None:
-            sync_target(target_id)
+        for _ in range(3):
+            with database.SessionLocal() as db:
+                target = db.get(Target, target_id)
+                if (
+                    target is None
+                    or not target.enabled
+                    or target.check_type not in SUPPORTED_CHECK_TYPES
+                ):
+                    # Deleted, disabled, or switched to an unsupported check type since the
+                    # job was scheduled: release the DB connection before taking the lock.
+                    db.rollback()
+                    remove_target(target_id)
+                    return
+                if run_check_and_store(db, target, require_enabled=True) is not None:
+                    return
     except Exception:
         logger.exception("Scheduled check failed for target %s", target_id)
 

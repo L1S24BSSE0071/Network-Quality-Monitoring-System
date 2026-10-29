@@ -143,6 +143,28 @@ def test_sync_of_a_missing_target_is_harmless(client, running_scheduler):
     assert not job_ids()
 
 
+def test_url_changed_during_scheduled_check_immediately_checks_new_url(client, make_target, monkeypatch):
+    """If host_or_url is edited while a scheduled check is in flight, the stale old check is
+    discarded and the worker immediately checks the new URL without waiting for the next interval."""
+    target = make_target(enabled=True, host_or_url="https://old.example.com", interval_seconds=3600)
+    checked_urls = []
+
+    def fake_check(url, **kw):
+        checked_urls.append(url)
+        if url == "https://old.example.com":
+            client.patch(f"/targets/{target['id']}", json={"host_or_url": "https://new.example.com"})
+            return checker.CheckOutcome(is_up=False, error_message="Old URL failed")
+        return checker.CheckOutcome(is_up=True, latency_ms=15.0, http_status=200)
+
+    monkeypatch.setattr(checker, "perform_http_check", fake_check)
+    scheduler.run_scheduled_check(target["id"])
+
+    assert checked_urls == ["https://old.example.com", "https://new.example.com"]
+    results = client.get(f"/targets/{target['id']}/results").json()
+    assert len(results) == 1
+    assert results[0]["is_up"] is True and results[0]["latency_ms"] == 15.0
+
+
 def test_concurrent_edits_leave_the_schedule_matching_the_database(client, make_target, running_scheduler):
     from concurrent.futures import ThreadPoolExecutor
     import random
