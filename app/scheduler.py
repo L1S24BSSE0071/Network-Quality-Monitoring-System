@@ -18,7 +18,7 @@ MAX_PARALLEL_CHECKS = 20
 
 _scheduler: Optional[BackgroundScheduler] = None
 
-# Serialises changes to the schedule. Reentrant because start() calls sync_target().
+# Serialises changes to the schedule. Reentrant because sync_target() calls remove_target().
 _lock = threading.RLock()
 
 
@@ -109,7 +109,6 @@ def start() -> None:
             executors={"default": ThreadPoolExecutor(MAX_PARALLEL_CHECKS)},
             timezone=timezone.utc,
         )
-        _scheduler.start()
         with database.SessionLocal() as db:
             rows = (
                 db.query(Target.id, Target.interval_seconds)
@@ -118,6 +117,7 @@ def start() -> None:
             )
         for target_id, interval_seconds in rows:
             _schedule_job(target_id, interval_seconds)
+        _scheduler.start()
         logger.info("Scheduler started with %d target(s)", len(_scheduler.get_jobs()))
 
 

@@ -23,11 +23,16 @@ _NUMERIC_HOST_RE = re.compile(r"^[0-9.]+$")
 
 
 def _is_valid_unicode_label(label: str) -> bool:
-    """True if a decoded IDNA label has only letters, digits, combining marks or interior hyphens."""
-    if not label or label.startswith("-") or label.endswith("-"):
+    """True if a decoded IDNA label has only letters, decimal digits, combining marks or interior hyphens."""
+    if (
+        not label
+        or label.startswith("-")
+        or label.endswith("-")
+        or unicodedata.category(label[0]).startswith("M")
+    ):
         return False
     return all(
-        ch == "-" or ch.isalnum() or unicodedata.category(ch).startswith("M")
+        ch == "-" or unicodedata.category(ch)[0] in ("L", "M") or unicodedata.category(ch) == "Nd"
         for ch in label
     )
 
@@ -48,6 +53,8 @@ def _is_valid_host(host: str) -> bool:
         pass
     host = host.removesuffix(".")  # fully qualified name with a trailing dot
     if not host:
+        return False
+    if not host.isascii() and not all(_is_valid_unicode_label(lbl) for lbl in host.split(".")):
         return False
     try:
         host = host.encode("idna").decode("ascii")
@@ -75,17 +82,19 @@ def validate_host_or_url(value: str, check_type: str) -> str:
             raise ValueError("URL does not contain a valid host name")
         if parsed.scheme not in ("http", "https"):
             raise ValueError("URL must start with http:// or https://")
+        if "@" in parsed.netloc:
+            raise ValueError("URL must not contain a user name or password")
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError("URL does not contain a valid host name")
         try:
-            hostname = parsed.hostname
             port = parsed.port  # raises ValueError for a malformed or out-of-range port
         except ValueError:
             raise ValueError("URL has an invalid port")
         if port == 0 or parsed.netloc.endswith(":"):
             raise ValueError("URL has an invalid port")
-        if not hostname or not _is_valid_host(hostname):
+        if not _is_valid_host(hostname):
             raise ValueError("URL does not contain a valid host name")
-        if "@" in parsed.netloc:
-            raise ValueError("URL must not contain a user name or password")
     else:  # ping
         if not _is_valid_host(value):
             raise ValueError("Ping target must be a host name or IP address (no http://, port or path)")
