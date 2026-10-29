@@ -7,7 +7,6 @@ from typing import Optional
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy.orm import Session
 
 from app import database
 from app.checker import SUPPORTED_CHECK_TYPES, run_check_and_store
@@ -49,15 +48,12 @@ def is_running() -> bool:
     return _scheduler is not None and _scheduler.running
 
 
-def sync_target(target_id: int, db: Optional[Session] = None) -> None:
+def sync_target(target_id: int) -> None:
     """Make the schedule match the target as it is stored in the database right now.
 
     The latest committed state is read here, under a lock, instead of trusting the
     caller's copy. Two edits made at the same moment can therefore never leave the
     schedule out of step with the database, whatever order they reach this function.
-
-    Pass the caller's session when there is one: it already holds a database connection,
-    and opening a second one while waiting for the lock could use up the connection pool.
 
     A target is scheduled only if it exists, is enabled and has a supported check
     type. Does nothing when the scheduler is not running (for example in tests).
@@ -65,30 +61,23 @@ def sync_target(target_id: int, db: Optional[Session] = None) -> None:
     with _lock:
         if not is_running():
             return
-        if db is None:
-            with database.SessionLocal() as own_session:
-                _apply_stored_state(own_session, target_id)
-        else:
-            db.expire_all()  # forget cached rows so the next read sees the latest commit
-            _apply_stored_state(db, target_id)
-
-
-def _apply_stored_state(db: Session, target_id: int) -> None:
-    target = db.get(Target, target_id)
-    if target is None or not target.enabled or target.check_type not in SUPPORTED_CHECK_TYPES:
-        remove_target(target_id)
-        return
-    _scheduler.add_job(
-        run_scheduled_check,
-        trigger=IntervalTrigger(seconds=target.interval_seconds, timezone=timezone.utc),
-        args=[target_id],
-        id=_job_id(target_id),
-        replace_existing=True,
-        max_instances=1,      # never run two checks of the same target at once
-        coalesce=True,        # if runs were missed, run once rather than in a burst
-        misfire_grace_time=30,
-        next_run_time=datetime.now(timezone.utc),  # first check starts immediately
-    )
+        with database.SessionLocal() as db:
+            target = db.get(Target, target_id)
+            if target is None or not target.enabled or target.check_type not in SUPPORTED_CHECK_TYPES:
+                remove_target(target_id)
+                return
+            interval_seconds = target.interval_seconds
+        _scheduler.add_job(
+            run_scheduled_check,
+            trigger=IntervalTrigger(seconds=interval_seconds, timezone=timezone.utc),
+            args=[target_id],
+            id=_job_id(target_id),
+            replace_existing=True,
+            max_instances=1,      # never run two checks of the same target at once
+            coalesce=True,        # if runs were missed, run once rather than in a burst
+            misfire_grace_time=30,
+            next_run_time=datetime.now(timezone.utc),  # first check starts immediately
+        )
 
 
 def remove_target(target_id: int) -> None:

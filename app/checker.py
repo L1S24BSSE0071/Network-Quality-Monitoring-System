@@ -180,5 +180,4 @@ def run_check_and_store(db: Session, target: Target) -> Optional[CheckResult]:
         # The foreign key failed: the target no longer exists.
         db.rollback()
         return None
-    db.refresh(result)
     return result

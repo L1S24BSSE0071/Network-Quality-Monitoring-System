@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 MIN_INTERVAL_SECONDS = 10
 MAX_INTERVAL_SECONDS = 3600
+MAX_THRESHOLD_MS = 3_600_000
 
 CheckType = Literal["http", "ping"]
 
@@ -91,8 +92,18 @@ class TargetBase(BaseModel):
         le=MAX_INTERVAL_SECONDS,
         description=f"Seconds between checks ({MIN_INTERVAL_SECONDS}-{MAX_INTERVAL_SECONDS}).",
     )
-    warning_ms: int = Field(default=500, gt=0, description="Latency (ms) above which a warning is raised.")
-    critical_ms: int = Field(default=1000, gt=0, description="Latency (ms) above which a critical event is raised.")
+    warning_ms: int = Field(
+        default=500,
+        gt=0,
+        le=MAX_THRESHOLD_MS,
+        description="Latency (ms) above which a warning is raised.",
+    )
+    critical_ms: int = Field(
+        default=1000,
+        gt=0,
+        le=MAX_THRESHOLD_MS,
+        description="Latency (ms) above which a critical event is raised.",
+    )
     enabled: bool = True
 
     @field_validator("name", "host_or_url", mode="before")
@@ -100,6 +111,13 @@ class TargetBase(BaseModel):
     def strip_whitespace(cls, value):
         """Trim spaces so '   ' counts as empty and is rejected."""
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("interval_seconds", "warning_ms", "critical_ms", mode="before")
+    @classmethod
+    def reject_bool_for_int(cls, value):
+        if isinstance(value, bool):
+            raise ValueError("Must be a whole number")
+        return value
 
     @field_validator("name")
     @classmethod
@@ -134,14 +152,21 @@ class TargetUpdate(BaseModel):
     interval_seconds: Optional[int] = Field(
         default=None, ge=MIN_INTERVAL_SECONDS, le=MAX_INTERVAL_SECONDS
     )
-    warning_ms: Optional[int] = Field(default=None, gt=0)
-    critical_ms: Optional[int] = Field(default=None, gt=0)
+    warning_ms: Optional[int] = Field(default=None, gt=0, le=MAX_THRESHOLD_MS)
+    critical_ms: Optional[int] = Field(default=None, gt=0, le=MAX_THRESHOLD_MS)
     enabled: Optional[bool] = None
 
     @field_validator("name", "host_or_url", mode="before")
     @classmethod
     def strip_whitespace(cls, value):
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("interval_seconds", "warning_ms", "critical_ms", mode="before")
+    @classmethod
+    def reject_bool_for_int(cls, value):
+        if isinstance(value, bool):
+            raise ValueError("Must be a whole number")
+        return value
 
     @field_validator("name")
     @classmethod
