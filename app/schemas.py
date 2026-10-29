@@ -25,8 +25,8 @@ def _is_valid_host(host: str) -> bool:
     """True if host is a valid hostname or IP address (no scheme, port or path).
 
     Accepts international names (converted to their ASCII form) and a trailing dot.
-    A name made only of digits and dots must be a real IPv4 address, so values such as
-    256.1.1.1 are rejected instead of being treated as a host name.
+    Per RFC 1123 / RFC 3696, the top-level label of a domain name cannot be all digits,
+    which also rejects malformed numeric addresses such as 256.1.1.1 or example.123.
     """
     if not host:
         return False
@@ -38,6 +38,8 @@ def _is_valid_host(host: str) -> bool:
     if _NUMERIC_HOST_RE.match(host):
         return False
     host = host.removesuffix(".")  # fully qualified name with a trailing dot
+    if not host or host.rsplit(".", 1)[-1].isdigit():
+        return False
     try:
         host = host.encode("idna").decode("ascii")
     except UnicodeError:
@@ -119,6 +121,13 @@ class TargetBase(BaseModel):
             raise ValueError("Must be a whole number")
         return value
 
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def require_strict_bool(cls, value):
+        if not isinstance(value, bool):
+            raise ValueError("Must be true or false")
+        return value
+
     @field_validator("name")
     @classmethod
     def validate_name_chars(cls, value: str) -> str:
@@ -173,7 +182,7 @@ class TargetUpdate(BaseModel):
     @field_validator("enabled", mode="before")
     @classmethod
     def reject_null_for_bool(cls, value):
-        if value is None:
+        if not isinstance(value, bool):
             raise ValueError("Must be true or false")
         return value
 

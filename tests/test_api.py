@@ -143,6 +143,8 @@ def test_valid_hosts_are_accepted(client, host_or_url):
         "http://exa mple.com",
         "http://example.com:0/",
         "http://example.com:/",
+        "http://example.123",
+        "http://test.99999/",
         "http://example.com/a b",
         "http://example.com/a\\b",
         "http://example.com/\x00",
@@ -231,3 +233,12 @@ def test_patch_rejects_explicit_null_values_upfront(client, make_target):
     assert response.status_code == 422
     fields = {err["field"] for err in response.json()["detail"]}
     assert fields == {"name", "interval_seconds", "enabled", "check_type"}
+
+
+@pytest.mark.parametrize("bad_bool", ["yes", "no", "true", 1, 0])
+def test_non_boolean_enabled_is_rejected(client, make_target, bad_bool):
+    response = client.post("/targets", json={**VALID, "enabled": bad_bool})
+    assert response.status_code == 422
+    assert response.json()["detail"] == [{"field": "enabled", "message": "Must be true or false"}]
+    target = make_target()
+    assert client.patch(f"/targets/{target['id']}", json={"enabled": bad_bool}).status_code == 422
