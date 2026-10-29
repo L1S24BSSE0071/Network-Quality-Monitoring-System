@@ -34,6 +34,16 @@ SUPPORTED_CHECK_TYPES = {"http"}
 # and shared by every check instead of once per check. SSL contexts are thread-safe.
 _SSL_CONTEXT = httpx.create_ssl_context()
 
+# Correlated subquery to fetch a target's latest event severity alongside the target row.
+_LAST_SEVERITY_SUBQ = (
+    select(Event.severity)
+    .where(Event.target_id == Target.id)
+    .order_by(Event.occurred_at.desc(), Event.id.desc())
+    .limit(1)
+    .correlate(Target)
+    .scalar_subquery()
+)
+
 
 @dataclass
 class CheckOutcome:
@@ -181,14 +191,6 @@ def run_check_and_store(
     db.rollback()
     outcome = perform_http_check(url)
     db.connection().exec_driver_sql("BEGIN IMMEDIATE")
-    last_severity_subq = (
-        select(Event.severity)
-        .where(Event.target_id == Target.id)
-        .order_by(Event.occurred_at.desc(), Event.id.desc())
-        .limit(1)
-        .correlate(Target)
-        .scalar_subquery()
-    )
     row = db.execute(
         select(
             Target.host_or_url,
@@ -196,7 +198,7 @@ def run_check_and_store(
             Target.enabled,
             Target.warning_ms,
             Target.critical_ms,
-            last_severity_subq,
+            _LAST_SEVERITY_SUBQ,
         ).where(Target.id == target_id)
     ).one_or_none()
     if (
@@ -207,8 +209,6 @@ def run_check_and_store(
     ):
         db.rollback()
         return None
-    target.warning_ms = row[3]
-    target.critical_ms = row[4]
     result = CheckResult(
         target_id=target_id,
         checked_at=utc_now(),
@@ -217,7 +217,14 @@ def run_check_and_store(
         http_status=outcome.http_status,
         error_message=outcome.error_message,
     )
-    record_state_change(db, target, result, last_severity=row[5])
+    record_state_change(
+        db,
+        target,
+        result,
+        last_severity=row[5],
+        warning_ms=row[3],
+        critical_ms=row[4],
+    )
     db.add(result)
     try:
         db.commit()
