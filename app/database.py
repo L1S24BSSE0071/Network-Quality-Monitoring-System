@@ -12,7 +12,14 @@ _DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "monitoring.db"
 DATABASE_URL = os.getenv("NQMS_DATABASE_URL", "").strip() or f"sqlite:///{_DEFAULT_DB_PATH.as_posix()}"
 
 # check_same_thread=False lets FastAPI and the scheduler threads share SQLite.
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# pool_size=20 matches MAX_PARALLEL_CHECKS so burst waves of checks reuse connections
+# instead of opening, running PRAGMAs on, and closing overflow connections each cycle.
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    pool_size=20,
+    max_overflow=20,
+)
 
 
 @event.listens_for(engine, "connect")
