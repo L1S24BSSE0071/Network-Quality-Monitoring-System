@@ -45,9 +45,11 @@ class CheckOutcome:
 
 def _describe_connect_error(exc: httpx.ConnectError) -> str:
     """Turn a low-level connection error into a short, readable message."""
-    cause = exc.__cause__
+    cause = exc.__cause__ or exc.__context__
+    seen: set[int] = set()
     # Walk the exception chain to find the root cause (DNS, TLS, refused...).
-    while cause is not None:
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
         if isinstance(cause, socket.gaierror):
             return "DNS lookup failed (host name could not be resolved)"
         if isinstance(cause, ssl.SSLCertVerificationError):
@@ -60,7 +62,12 @@ def _describe_connect_error(exc: httpx.ConnectError) -> str:
     text = str(exc).lower()
     if "certificate" in text:
         return "SSL certificate error"
-    if "name or service not known" in text or "getaddrinfo" in text or "nodename" in text:
+    if (
+        "name or service not known" in text
+        or "getaddrinfo" in text
+        or "nodename" in text
+        or "no address associated" in text
+    ):
         return "DNS lookup failed (host name could not be resolved)"
     return (f"Connection failed: {exc}" if str(exc) else "Connection failed")[:500]
 
@@ -89,6 +96,7 @@ def _run_http_check(
             transport=transport,
             verify=_SSL_CONTEXT,
             headers={"User-Agent": USER_AGENT},
+            trust_env=False,
         ) as client:
             # Start the timer after the client is built so set-up work is not counted.
             start = time.perf_counter()
