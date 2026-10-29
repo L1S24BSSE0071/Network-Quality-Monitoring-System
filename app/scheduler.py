@@ -42,7 +42,9 @@ def run_scheduled_check(target_id: int) -> None:
                 db.rollback()
                 remove_target(target_id)
                 return
-            run_check_and_store(db, target, require_enabled=True)
+            stored = run_check_and_store(db, target, require_enabled=True)
+        if stored is None:
+            sync_target(target_id)
     except Exception:
         logger.exception("Scheduled check failed for target %s", target_id)
 

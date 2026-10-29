@@ -203,7 +203,7 @@ def test_large_and_fractional_latency_formatting_avoids_scientific_notation(
     assert "e+" not in decision.message
 
 
-@pytest.mark.parametrize("bad_latency", [float("nan"), float("inf"), float("-inf"), -5.0])
+@pytest.mark.parametrize("bad_latency", [float("nan"), float("inf"), float("-inf"), -5.0, True, False])
 def test_non_finite_or_negative_latency_is_treated_as_critical_without_nan_in_message(bad_latency):
     state, decision = evaluate_transition(
         "normal",
@@ -269,6 +269,12 @@ def test_evaluate_transition_rejects_invalid_previous_state(bad_previous):
         )
 
 
+@pytest.mark.parametrize("bad_is_up", [1, 0, None, "yes"])
+def test_evaluate_state_rejects_non_boolean_is_up(bad_is_up):
+    with pytest.raises(ValueError, match="is_up"):
+        evaluate_state(bad_is_up, 50.0, warning_ms=500, critical_ms=1000)  # type: ignore[arg-type]
+
+
 def test_blank_error_message_falls_back_to_clean_down_message():
     _, decision = evaluate_transition(
         "normal",
@@ -280,6 +286,23 @@ def test_blank_error_message_falls_back_to_clean_down_message():
     )
     assert decision is not None
     assert decision.message == "Target is down"
+
+
+def test_threshold_edit_during_in_flight_check_applies_new_thresholds(client, make_target, monkeypatch):
+    target = make_target(warning_ms=500, critical_ms=1000)
+    target_id = target["id"]
+
+    def check_while_lowering_thresholds(url, **kw):
+        client.patch(f"/targets/{target_id}", json={"warning_ms": 100, "critical_ms": 300})
+        return CheckOutcome(is_up=True, latency_ms=200.0, http_status=200)
+
+    monkeypatch.setattr(checker, "perform_http_check", check_while_lowering_thresholds)
+    resp = client.post(f"/targets/{target_id}/check")
+    assert resp.status_code == 201
+    events = _fetch_events(target_id)
+    assert len(events) == 1
+    assert events[0].severity == "warning"
+    assert "100 ms" in events[0].message
 
 
 # ---------------------------------------------------------------------------

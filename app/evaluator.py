@@ -32,6 +32,19 @@ def _format_ms(value: float) -> str:
     return "0" if text in ("", "-0") else text
 
 
+def _normalize_latency(latency_ms: Optional[float]) -> Optional[float]:
+    """Return latency_ms rounded to 2 decimal places, or None if missing, negative, boolean or non-finite."""
+    if (
+        latency_ms is None
+        or isinstance(latency_ms, bool)
+        or not isinstance(latency_ms, (int, float))
+        or not math.isfinite(latency_ms)
+        or latency_ms < 0
+    ):
+        return None
+    return round(float(latency_ms), 2)
+
+
 def state_from_last_severity(last_severity: Optional[str]) -> TargetState:
     """Infer the target's state before a check from its most recent event severity.
 
@@ -59,6 +72,8 @@ def evaluate_state(
     or if latency_ms is strictly above critical_ms. It is warning if latency_ms is
     strictly above warning_ms (and at or below critical_ms). Otherwise it is normal.
     """
+    if not isinstance(is_up, bool):
+        raise ValueError("is_up must be true or false")
     if (
         type(warning_ms) is not int
         or type(critical_ms) is not int
@@ -70,11 +85,12 @@ def evaluate_state(
             f"warning_ms and critical_ms must be whole numbers between 1 and {MAX_THRESHOLD_MS} "
             "with warning_ms < critical_ms"
         )
-    if not is_up or latency_ms is None or not math.isfinite(latency_ms) or latency_ms < 0:
+    clean_latency = _normalize_latency(latency_ms)
+    if not is_up or clean_latency is None:
         return "critical"
-    if latency_ms > critical_ms:
+    if clean_latency > critical_ms:
         return "critical"
-    if latency_ms > warning_ms:
+    if clean_latency > warning_ms:
         return "warning"
     return "normal"
 
@@ -98,11 +114,7 @@ def evaluate_transition(
     if previous_state not in _VALID_STATES:
         raise ValueError(f"Invalid previous_state: {previous_state!r}")
 
-    has_valid_latency = (
-        latency_ms is not None and math.isfinite(latency_ms) and latency_ms >= 0
-    )
-    clean_latency = round(latency_ms, 2) if has_valid_latency else None
-
+    clean_latency = _normalize_latency(latency_ms)
     new_state = evaluate_state(is_up, clean_latency, warning_ms, critical_ms)
     if new_state == previous_state:
         return new_state, None
@@ -153,6 +165,8 @@ def record_state_change(
     result: CheckResult,
     *,
     last_severity: object = _UNSET,
+    warning_ms: Optional[int] = None,
+    critical_ms: Optional[int] = None,
 ) -> Optional[Event]:
     """Evaluate result against target's thresholds and add an Event to db if the state changed.
 
@@ -168,11 +182,7 @@ def record_state_change(
             .limit(1)
         )
     previous_state = state_from_last_severity(last_severity)  # type: ignore[arg-type]
-    if result.latency_ms is not None:
-        if not math.isfinite(result.latency_ms) or result.latency_ms < 0:
-            result.latency_ms = None
-        else:
-            result.latency_ms = round(result.latency_ms, 2)
+    result.latency_ms = _normalize_latency(result.latency_ms)
     if result.latency_ms is None and result.is_up:
         result.is_up = False
     _, decision = evaluate_transition(
@@ -180,8 +190,8 @@ def record_state_change(
         is_up=result.is_up,
         latency_ms=result.latency_ms,
         error_message=result.error_message,
-        warning_ms=target.warning_ms,
-        critical_ms=target.critical_ms,
+        warning_ms=target.warning_ms if warning_ms is None else warning_ms,
+        critical_ms=target.critical_ms if critical_ms is None else critical_ms,
     )
     if decision is None:
         return None
