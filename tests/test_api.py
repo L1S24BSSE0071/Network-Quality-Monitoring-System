@@ -209,6 +209,10 @@ def test_credentials_in_url_have_a_clear_message(client):
 
 
 def test_malformed_json_and_non_object_bodies_have_clear_messages(client):
+    empty_body = client.post("/targets")
+    assert empty_body.status_code == 422
+    assert empty_body.json()["detail"] == [{"field": "(request)", "message": "Request body is required"}]
+
     bad_json = client.post("/targets", content=b"{bad json", headers={"content-type": "application/json"})
     assert bad_json.status_code == 422
     assert bad_json.json()["detail"] == [{"field": "(request)", "message": "Request body is not valid JSON"}]
