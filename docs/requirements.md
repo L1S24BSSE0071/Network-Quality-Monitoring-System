@@ -126,4 +126,5 @@ Priority follows the project plan: **M** = Must have, **S** = Should have, **O**
 - Timestamps are stored and returned in UTC.
 - Response time is measured until the response headers arrive; the page body is not downloaded.
 - Each check is abandoned and recorded as timed out about 11 seconds after it starts (the 10-second timeout plus a 1-second grace), even if the operating system's DNS look-up hangs. The stuck look-up finishes in the background and its result is discarded.
-- Check history is not pruned automatically, so the database grows over time.- Ping support depends on the operating system.
+- Check history is not pruned automatically, so the database grows over time.
+- Ping support depends on the operating system.

@@ -55,7 +55,7 @@ The SQLite database file `monitoring.db` is created automatically in the project
 
 When the server starts, every enabled target is checked in the background at its own `interval_seconds`, and each result is stored in `check_results`. The first check runs immediately.
 
-- Adding, editing, enabling, disabling or deleting a target through the API updates the schedule straight away (an added or edited target is checked immediately).
+- Adding, enabling, disabling or deleting a target, or editing its URL, check type or interval, updates the schedule straight away; renaming a target or changing its latency thresholds does not restart the schedule.
 - Checks never overlap for the same target and run in separate threads, so a slow target does not block the API or other targets.
 - A failing target cannot stop the scheduler; the failure is stored as a result with an error message.
 - Targets with an unsupported check type (ping) are not scheduled.
@@ -136,9 +136,9 @@ app/
   errors.py        Readable validation error messages
   checker.py       HTTP check and result storage
   scheduler.py     Background scheduler (APScheduler)
-tests/                Automated tests (pytest)
   routers/
     targets.py     Target, check and results endpoints
+tests/             Automated tests (pytest)
 docs/
   requirements.md  Requirements and scope
   design.md        Architecture, ER and state diagrams

@@ -154,7 +154,7 @@ def perform_http_check(
     thread = threading.Thread(target=worker, name="http-check", daemon=True)
     thread.start()
     thread.join(timeout_seconds + DEADLINE_GRACE_SECONDS)
-    if thread.is_alive():
+    if thread.is_alive() or "outcome" not in box:
         logger.warning("Check of %s abandoned after %gs (stuck, probably in DNS)", url, timeout_seconds)
         return CheckOutcome(is_up=False, error_message=f"Timed out after {timeout_seconds:g} seconds")
     return box["outcome"]
