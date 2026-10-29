@@ -1,11 +1,15 @@
 """SQLite database connection and session handling."""
 import os
+from pathlib import Path
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
+# The default database lives in the project folder, wherever the server is started from
+# (a relative path would silently create a second, empty database in the current folder).
 # Can be overridden with the NQMS_DATABASE_URL environment variable (used by tests).
-DATABASE_URL = os.getenv("NQMS_DATABASE_URL", "sqlite:///./monitoring.db")
+_DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "monitoring.db"
+DATABASE_URL = os.getenv("NQMS_DATABASE_URL", f"sqlite:///{_DEFAULT_DB_PATH.as_posix()}")
 
 # check_same_thread=False lets FastAPI and the scheduler threads share SQLite.
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})

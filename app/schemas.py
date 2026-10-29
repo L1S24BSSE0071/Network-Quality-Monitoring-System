@@ -17,7 +17,6 @@ _HOSTNAME_RE = re.compile(
     r"^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$"
 )
 
-
 _NUMERIC_HOST_RE = re.compile(r"^[0-9.]+$")
 
 
@@ -47,14 +46,18 @@ def _is_valid_host(host: str) -> bool:
 
 def validate_host_or_url(value: str, check_type: str) -> str:
     """Validate the host/URL for the given check type; return it unchanged if valid."""
+    if any(ord(ch) <= 32 or ord(ch) == 127 for ch in value):
+        raise ValueError("Host or URL must not contain spaces or control characters")
     if check_type == "http":
         parsed = urlparse(value)
         if parsed.scheme not in ("http", "https"):
             raise ValueError("URL must start with http:// or https://")
         try:
             hostname = parsed.hostname
-            parsed.port  # raises ValueError for a malformed or out-of-range port
+            port = parsed.port  # raises ValueError for a malformed or out-of-range port
         except ValueError:
+            raise ValueError("URL has an invalid port")
+        if port == 0:
             raise ValueError("URL has an invalid port")
         if not hostname or not _is_valid_host(hostname):
             raise ValueError("URL does not contain a valid host name")
@@ -70,6 +73,12 @@ def validate_thresholds(warning_ms: int, critical_ms: int) -> None:
     """The warning threshold must be lower than the critical threshold."""
     if warning_ms >= critical_ms:
         raise ValueError("warning_ms must be lower than critical_ms")
+
+
+def _check_no_control_chars(value: Optional[str]) -> Optional[str]:
+    if value is not None and any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        raise ValueError("Name must not contain control characters")
+    return value
 
 
 class TargetBase(BaseModel):
@@ -91,6 +100,11 @@ class TargetBase(BaseModel):
     def strip_whitespace(cls, value):
         """Trim spaces so '   ' counts as empty and is rejected."""
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_chars(cls, value: str) -> str:
+        return _check_no_control_chars(value)
 
 
 class TargetCreate(TargetBase):
@@ -128,6 +142,11 @@ class TargetUpdate(BaseModel):
     @classmethod
     def strip_whitespace(cls, value):
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_chars(cls, value: Optional[str]) -> Optional[str]:
+        return _check_no_control_chars(value)
 
 
 class TargetRead(TargetBase):

@@ -49,7 +49,7 @@ python -m uvicorn app.main:app --reload
 - Interactive API documentation: http://127.0.0.1:8000/docs
 - Health check: http://127.0.0.1:8000/health
 
-The SQLite database file `monitoring.db` is created automatically in the folder you start the server from.
+The SQLite database file `monitoring.db` is created automatically in the project folder.
 
 ## Scheduled checking
 
@@ -64,7 +64,7 @@ When the server starts, every enabled target is checked in the background at its
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `NQMS_DATABASE_URL` (environment variable) | `sqlite:///./monitoring.db` | Database location |
+| `NQMS_DATABASE_URL` (environment variable) | `monitoring.db` in the project folder | Database location. The default does not depend on the folder the server is started from |
 
 ## API overview
 

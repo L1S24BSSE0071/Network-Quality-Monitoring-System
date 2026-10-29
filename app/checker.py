@@ -1,6 +1,8 @@
 """Performs checks against targets and stores the results."""
+import logging
 import socket
 import ssl
+import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -11,7 +13,13 @@ from sqlalchemy.orm import Session
 
 from app.models import CheckResult, Target
 
+logger = logging.getLogger("nqms.checker")
+
 DEFAULT_TIMEOUT_SECONDS = 10.0
+
+# Extra time allowed on top of the timeout before a check is abandoned. The normal timeout
+# message from httpx should win in ordinary cases; this only catches a stuck check.
+DEADLINE_GRACE_SECONDS = 1.0
 
 # Identifies the monitor to the sites it checks. Some servers reject requests that carry
 # a generic library name, which would be reported as a false outage.
@@ -43,9 +51,9 @@ def _describe_connect_error(exc: httpx.ConnectError) -> str:
         if isinstance(cause, socket.gaierror):
             return "DNS lookup failed (host name could not be resolved)"
         if isinstance(cause, ssl.SSLCertVerificationError):
-            return f"SSL certificate error: {cause.verify_message}"
+            return f"SSL certificate error: {cause.verify_message}"[:500]
         if isinstance(cause, ssl.SSLError):
-            return f"SSL error: {cause}"
+            return f"SSL error: {cause}"[:500]
         if isinstance(cause, ConnectionRefusedError):
             return "Connection refused"
         cause = cause.__cause__ or cause.__context__
@@ -54,10 +62,10 @@ def _describe_connect_error(exc: httpx.ConnectError) -> str:
         return "SSL certificate error"
     if "name or service not known" in text or "getaddrinfo" in text or "nodename" in text:
         return "DNS lookup failed (host name could not be resolved)"
-    return f"Connection failed: {exc}" if str(exc) else "Connection failed"
+    return (f"Connection failed: {exc}" if str(exc) else "Connection failed")[:500]
 
 
-def perform_http_check(
+def _run_http_check(
     url: str,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     transport: Optional[httpx.BaseTransport] = None,
@@ -95,7 +103,7 @@ def perform_http_check(
     except httpx.TooManyRedirects:
         return CheckOutcome(is_up=False, error_message="Too many redirects")
     except (httpx.InvalidURL, httpx.UnsupportedProtocol) as exc:
-        return CheckOutcome(is_up=False, error_message=f"Invalid URL: {exc}")
+        return CheckOutcome(is_up=False, error_message=f"Invalid URL: {exc}"[:500])
     except httpx.HTTPError as exc:
         return CheckOutcome(is_up=False, error_message=f"Request failed: {type(exc).__name__}: {exc}"[:500])
     except Exception as exc:  # last resort so a check can never crash the caller
@@ -111,6 +119,39 @@ def perform_http_check(
     return CheckOutcome(is_up=True, latency_ms=latency_ms, http_status=status_code)
 
 
+def perform_http_check(
+    url: str,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    transport: Optional[httpx.BaseTransport] = None,
+) -> CheckOutcome:
+    """Run an HTTP check that is guaranteed to return within about timeout_seconds.
+
+    httpx applies its timeout to each stage of a request, and the operating system's DNS
+    look-up is not covered by it at all, so a hung resolver could block a check for far
+    longer. The check therefore runs in a helper thread and is abandoned, and reported as
+    timed out, once the overall deadline passes. An abandoned thread is a daemon thread: it
+    ends by itself when the look-up returns, its result is discarded, and it never blocks
+    shutdown.
+
+    Never raises; see _run_http_check for the meaning of the outcome.
+    """
+    if transport is not None:
+        return _run_http_check(url, timeout_seconds, transport)
+
+    box: dict = {}
+
+    def worker() -> None:
+        box["outcome"] = _run_http_check(url, timeout_seconds, transport)
+
+    thread = threading.Thread(target=worker, name="http-check", daemon=True)
+    thread.start()
+    thread.join(timeout_seconds + DEADLINE_GRACE_SECONDS)
+    if thread.is_alive():
+        logger.warning("Check of %s abandoned after %gs (stuck, probably in DNS)", url, timeout_seconds)
+        return CheckOutcome(is_up=False, error_message=f"Timed out after {timeout_seconds:g} seconds")
+    return box["outcome"]
+
+
 def run_check_and_store(db: Session, target: Target) -> Optional[CheckResult]:
     """Run the check configured for the target and save the result.
 
@@ -119,8 +160,12 @@ def run_check_and_store(db: Session, target: Target) -> Optional[CheckResult]:
     """
     if target.check_type not in SUPPORTED_CHECK_TYPES:
         raise NotImplementedError(f"Check type '{target.check_type}' is not supported yet")
-    target_id = target.id
-    outcome = perform_http_check(target.host_or_url)
+    target_id, url = target.id, target.host_or_url
+    # End the read transaction first. Otherwise this session keeps its pooled database
+    # connection checked out for the whole (possibly 10 s) network call, and a few dozen
+    # slow targets would use up the pool and make every API request wait.
+    db.rollback()
+    outcome = perform_http_check(url)
     result = CheckResult(
         target_id=target_id,
         is_up=outcome.is_up,

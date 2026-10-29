@@ -33,6 +33,8 @@ def _friendly_message(err: dict) -> str:
         return "Unknown field"
     if kind == "json_invalid":
         return "Request body is not valid JSON"
+    if kind in ("dict_type", "model_attributes_type", "model_type"):
+        return "Request body must be a JSON object"
     message = err.get("msg", "Invalid value")
     return message.removeprefix("Value error, ")
 
@@ -42,5 +44,7 @@ def format_errors(errors: list[dict]) -> list[dict]:
     formatted = []
     for err in errors:
         field = ".".join(str(part) for part in err.get("loc", ()) if part not in _LOCATION_PREFIXES)
+        if err.get("type") == "json_invalid":
+            field = ""  # the location is a character position, not a field
         formatted.append({"field": field or "(request)", "message": _friendly_message(err)})
     return formatted

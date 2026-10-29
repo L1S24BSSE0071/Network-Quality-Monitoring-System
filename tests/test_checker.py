@@ -159,3 +159,35 @@ def test_user_agent_identifies_the_monitor():
 
     check(handler)
     assert seen["agent"].startswith("NetworkQualityMonitor/")
+
+
+def test_check_is_abandoned_at_the_deadline_when_dns_hangs(monkeypatch):
+    """Regression: httpx timeouts do not cover DNS, so a hung look-up used to block the check."""
+    import socket
+    import time
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: time.sleep(5))
+    started = time.perf_counter()
+    outcome = checker.perform_http_check("http://hung-dns.test/", timeout_seconds=1)
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 3, f"check took {elapsed:.1f} s"
+    assert not outcome.is_up and outcome.latency_ms is None
+    assert outcome.error_message == "Timed out after 1 seconds"
+
+
+def test_no_database_connection_is_held_during_the_network_call(client, make_target, monkeypatch):
+    """Regression: a session kept its pooled connection for the whole check, so a few dozen
+    slow targets used up the pool and made every API request wait."""
+    target = make_target()
+    held_during_check = []
+
+    def fake_check(url, **kwargs):
+        held_during_check.append(database.engine.pool.checkedout())
+        return checker.CheckOutcome(is_up=True, latency_ms=1.0, http_status=200)
+
+    monkeypatch.setattr(checker, "perform_http_check", fake_check)
+    with database.SessionLocal() as db:
+        stored = checker.run_check_and_store(db, db.get(Target, target["id"]))
+    assert stored is not None
+    assert held_during_check == [0]

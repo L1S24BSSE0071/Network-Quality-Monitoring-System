@@ -102,3 +102,51 @@ def test_job_for_a_deleted_target_removes_itself(client, make_target, running_sc
     client.delete(f"/targets/{target['id']}")
     scheduler.run_scheduled_check(target["id"])  # must not raise and must leave no job
     assert job not in job_ids()
+
+
+def test_sync_applies_the_latest_stored_state_whatever_order_calls_arrive(client, make_target, running_scheduler):
+    """Regression: sync used the caller's possibly stale copy, so two simultaneous edits
+    could leave an enabled target without a job."""
+    from app import database
+    from app.models import Target
+
+    target = make_target(enabled=False, interval_seconds=3600)
+    job = f"target-{target['id']}"
+
+    def set_enabled(value):
+        with database.SessionLocal() as db:
+            db.get(Target, target["id"]).enabled = value
+            db.commit()
+
+    set_enabled(True)
+    scheduler.sync_target(target["id"])
+    assert job in job_ids()
+    set_enabled(False)
+    scheduler.sync_target(target["id"])
+    assert job not in job_ids()
+    set_enabled(True)
+    scheduler.sync_target(target["id"])
+    scheduler.sync_target(target["id"])  # repeating it changes nothing
+    assert job in job_ids() and len(job_ids()) == 1
+
+
+def test_sync_of_a_missing_target_is_harmless(client, running_scheduler):
+    scheduler.sync_target(424242)
+    assert not job_ids()
+
+
+def test_concurrent_edits_leave_the_schedule_matching_the_database(client, make_target, running_scheduler):
+    from concurrent.futures import ThreadPoolExecutor
+    import random
+
+    ids = [make_target(enabled=True, interval_seconds=3600, name=f"t{i}")["id"] for i in range(6)]
+
+    def hammer(_):
+        for _ in range(25):
+            client.patch(f"/targets/{random.choice(ids)}", json={"enabled": random.random() < 0.5})
+
+    with ThreadPoolExecutor(8) as pool:
+        list(pool.map(hammer, range(8)))
+
+    stored = {t["id"]: t["enabled"] for t in client.get("/targets").json()}
+    assert {i for i in ids if stored[i]} == {int(j.split("-")[1]) for j in job_ids()}
