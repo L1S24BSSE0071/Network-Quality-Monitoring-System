@@ -32,6 +32,7 @@ _SCHEDULE_FIELDS = {"host_or_url", "check_type", "interval_seconds", "enabled"}
 def _get_target_or_404(target_id: int, db: Session) -> Target:
     target = db.get(Target, target_id)
     if target is None:
+        db.rollback()
         raise HTTPException(status_code=404, detail=f"Target {target_id} not found")
     return target
 
@@ -84,6 +85,7 @@ def update_target(target_id: TargetId, payload: TargetUpdate, db: Session = Depe
                 changes.get("critical_ms", target.critical_ms),
             )
     except ValueError as exc:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=[{"field": "(request)", "message": str(exc)}],
@@ -147,11 +149,15 @@ def list_results(
     db: Session = Depends(get_db),
 ):
     """Most recent check results for a target, newest first."""
-    _get_target_or_404(target_id, db)
     query = (
         select(CheckResult)
         .where(CheckResult.target_id == target_id)
         .order_by(CheckResult.checked_at.desc(), CheckResult.id.desc())
         .limit(limit)
     )
-    return db.scalars(query).all()
+    results = db.scalars(query).all()
+    if not results:
+        # Foreign keys guarantee a target exists when results are present; only query
+        # the targets table when there are no results (to distinguish empty vs 404).
+        _get_target_or_404(target_id, db)
+    return results
