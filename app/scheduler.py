@@ -39,7 +39,7 @@ def run_scheduled_check(target_id: int) -> None:
                 # Deleted or disabled since the job was scheduled: stop checking it.
                 remove_target(target_id)
                 return
-            run_check_and_store(db, target)
+            run_check_and_store(db, target, require_enabled=True)
     except Exception:
         logger.exception("Scheduled check failed for target %s", target_id)
 
