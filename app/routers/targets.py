@@ -95,6 +95,7 @@ def update_target(target_id: TargetId, payload: TargetUpdate, db: Session = Depe
         field for field, value in changes.items() if getattr(target, field) != value
     }
     if not changed_fields:
+        db.expunge(target)  # keep loaded attributes in memory so rollback does not expire them
         db.rollback()
         return target
 
@@ -111,12 +112,14 @@ def update_target(target_id: TargetId, payload: TargetUpdate, db: Session = Depe
 def delete_target(target_id: TargetId, db: Session = Depends(get_db)):
     """Delete a target together with its check results and events."""
     db.connection().exec_driver_sql("BEGIN IMMEDIATE")
-    target = _get_target_or_404(target_id, db)
-    # Delete the history with two bulk statements instead of loading every row, and so
-    # that it also works on databases created before ON DELETE CASCADE was added.
+    # Delete the history and target with bulk statements instead of loading ORM rows,
+    # and so that it also works on databases created before ON DELETE CASCADE was added.
     db.execute(delete(CheckResult).where(CheckResult.target_id == target_id))
     db.execute(delete(Event).where(Event.target_id == target_id))
-    db.delete(target)
+    deleted = db.execute(delete(Target).where(Target.id == target_id)).rowcount
+    if not deleted:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=f"Target {target_id} not found")
     db.commit()
     db.close()
     scheduler.remove_target(target_id)
