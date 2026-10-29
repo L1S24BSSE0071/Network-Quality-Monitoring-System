@@ -152,20 +152,32 @@ def perform_http_check(
     return box["outcome"]
 
 
-def run_check_and_store(db: Session, target: Target) -> Optional[CheckResult]:
+def run_check_and_store(
+    db: Session, target: Target, *, require_enabled: bool = False
+) -> Optional[CheckResult]:
     """Run the check configured for the target and save the result.
 
-    Returns None if the target was deleted while the check was running, in which
-    case nothing is stored.
+    Returns None if the target was deleted, disabled (when require_enabled is True),
+    or pointed at a different host/URL while the check was running, so a stale
+    in-flight check can never overwrite a changed or disabled target.
     """
     if target.check_type not in SUPPORTED_CHECK_TYPES:
         raise NotImplementedError(f"Check type '{target.check_type}' is not supported yet")
-    target_id, url = target.id, target.host_or_url
+    target_id, url, check_type = target.id, target.host_or_url, target.check_type
     # End the read transaction first. Otherwise this session keeps its pooled database
     # connection checked out for the whole (possibly 10 s) network call, and a few dozen
     # slow targets would use up the pool and make every API request wait.
     db.rollback()
     outcome = perform_http_check(url)
+    current = db.get(Target, target_id)
+    if (
+        current is None
+        or current.host_or_url != url
+        or current.check_type != check_type
+        or (require_enabled and not current.enabled)
+    ):
+        db.rollback()
+        return None
     result = CheckResult(
         target_id=target_id,
         is_up=outcome.is_up,

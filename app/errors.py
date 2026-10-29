@@ -23,7 +23,7 @@ def _friendly_message(err: dict) -> str:
         return f"Must be at most {ctx.get('le')}"
     if kind == "literal_error":
         return f"Must be {ctx.get('expected')}"
-    if kind in ("int_parsing", "int_from_float"):
+    if kind in ("int_parsing", "int_from_float", "int_type", "finite_number"):
         return "Must be a whole number"
     if kind in ("bool_parsing", "bool_type"):
         return "Must be true or false"

@@ -207,9 +207,14 @@ def test_default_database_is_in_the_project_folder_not_the_current_folder():
         {"warning_ms": 10**25, "critical_ms": 2 * 10**25},
         {"warning_ms": True, "critical_ms": 1000},
         {"interval_seconds": True},
+        {"interval_seconds": None},
     ],
 )
 def test_huge_thresholds_and_booleans_for_ints_are_rejected(client, make_target, overrides):
-    assert client.post("/targets", json={**VALID, **overrides}).status_code == 422
+    response = client.post("/targets", json={**VALID, **overrides})
+    assert response.status_code == 422
+    if ("interval_seconds", None) in overrides.items() or isinstance(next(iter(overrides.values())), bool):
+        assert response.json()["detail"][0]["message"] == "Must be a whole number"
     target = make_target()
-    assert client.patch(f"/targets/{target['id']}", json=overrides).status_code == 422
+    if None not in overrides.values():
+        assert client.patch(f"/targets/{target['id']}", json=overrides).status_code == 422
