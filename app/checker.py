@@ -197,8 +197,8 @@ def run_check_and_store(
         http_status=outcome.http_status,
         error_message=outcome.error_message,
     )
-    db.add(result)
     record_state_change(db, current, result)
+    db.add(result)
     try:
         db.commit()
     except IntegrityError:

@@ -1,4 +1,5 @@
 """Threshold evaluation and state-change event generation."""
+import math
 from dataclasses import dataclass
 from typing import Literal, Optional
 
@@ -18,6 +19,12 @@ class EventDecision:
     severity: EventSeverity
     message: str
     latency_ms: Optional[float]
+
+
+def _format_ms(value: float) -> str:
+    """Format a millisecond value up to 2 decimal places without trailing zeros or scientific notation."""
+    text = f"{value:.2f}".rstrip("0").rstrip(".")
+    return "0" if text in ("", "-0") else text
 
 
 def state_from_last_severity(last_severity: Optional[str]) -> TargetState:
@@ -41,11 +48,11 @@ def evaluate_state(
 ) -> TargetState:
     """Classify a single check result as 'normal', 'warning' or 'critical'.
 
-    A target is critical if the check failed (is_up is False or latency_ms is None)
+    A target is critical if the check failed (is_up is False or latency_ms is missing/non-finite)
     or if latency_ms is strictly above critical_ms. It is warning if latency_ms is
     strictly above warning_ms (and at or below critical_ms). Otherwise it is normal.
     """
-    if not is_up or latency_ms is None:
+    if not is_up or latency_ms is None or not math.isfinite(latency_ms) or latency_ms < 0:
         return "critical"
     if latency_ms > critical_ms:
         return "critical"
@@ -70,43 +77,51 @@ def evaluate_transition(
     - Entering 'critical' (from 'normal' or 'warning') -> severity 'critical'
     - Returning to 'normal' (from 'warning' or 'critical') -> severity 'recovered'
     """
-    new_state = evaluate_state(is_up, latency_ms, warning_ms, critical_ms)
+    has_valid_latency = (
+        latency_ms is not None and math.isfinite(latency_ms) and latency_ms >= 0
+    )
+    clean_latency = round(latency_ms, 2) if has_valid_latency else None
+
+    new_state = evaluate_state(is_up, clean_latency, warning_ms, critical_ms)
     if new_state == previous_state:
         return new_state, None
 
     if new_state == "critical":
-        if not is_up or latency_ms is None:
+        if not is_up or clean_latency is None:
             detail = f"Target is down: {error_message}" if error_message else "Target is down"
         else:
             detail = (
-                f"Latency {latency_ms:g} ms exceeded critical threshold ({critical_ms} ms)"
+                f"Latency {_format_ms(clean_latency)} ms exceeded critical threshold ({critical_ms} ms)"
             )
         return new_state, EventDecision(
             severity="critical",
             message=detail[:500],
-            latency_ms=latency_ms,
+            latency_ms=clean_latency,
         )
+
+    assert clean_latency is not None
+    formatted = _format_ms(clean_latency)
 
     if new_state == "warning":
         if previous_state == "critical":
             detail = (
-                f"Target improved from critical to warning: latency {latency_ms:g} ms "
+                f"Target improved from critical to warning: latency {formatted} ms "
                 f"exceeded warning threshold ({warning_ms} ms)"
             )
         else:
-            detail = f"Latency {latency_ms:g} ms exceeded warning threshold ({warning_ms} ms)"
+            detail = f"Latency {formatted} ms exceeded warning threshold ({warning_ms} ms)"
         return new_state, EventDecision(
             severity="warning",
             message=detail[:500],
-            latency_ms=latency_ms,
+            latency_ms=clean_latency,
         )
 
     # new_state == "normal" (from "warning" or "critical")
-    detail = f"Target recovered (latency {latency_ms:g} ms, threshold {warning_ms} ms)"
+    detail = f"Target recovered (latency {formatted} ms, threshold {warning_ms} ms)"
     return new_state, EventDecision(
         severity="recovered",
         message=detail[:500],
-        latency_ms=latency_ms,
+        latency_ms=clean_latency,
     )
 
 
@@ -136,10 +151,11 @@ def record_state_change(
     if decision is None:
         return None
 
-    timestamp = result.checked_at or utc_now()
+    if result.checked_at is None:
+        result.checked_at = utc_now()
     event = Event(
         target_id=target.id,
-        occurred_at=timestamp,
+        occurred_at=result.checked_at,
         severity=decision.severity,
         message=decision.message,
         latency_ms=decision.latency_ms,
