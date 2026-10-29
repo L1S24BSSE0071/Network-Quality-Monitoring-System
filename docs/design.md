@@ -41,7 +41,7 @@ flowchart LR
 | Validation | `app/schemas.py`, `app/errors.py` | Input rules and response shapes | Built (Week 1) |
 | Checker | `app/checker.py` | HTTP check with timeout and error handling; stores a result | Built (Week 1) |
 | Scheduler | `app/scheduler.py` | Runs checks in the background per target interval; follows target add, edit and delete | Built (Week 2) |
-| Threshold evaluator | planned | Compares latency to thresholds and creates events on state change | Week 2 |
+| Threshold evaluator | `app/evaluator.py` | Compares latency to thresholds and creates events on state change | Built (Week 2) |
 | Dashboard | planned | Status, history chart, forms, events, report export | Week 3 |
 
 ### Check flow
@@ -66,7 +66,7 @@ sequenceDiagram
     E->>D: store event only if the state changed
 ```
 
-The manual check endpoint (`POST /targets/{id}/check`) uses the same checker. The evaluator step is added in Week 2.
+The manual check endpoint (`POST /targets/{id}/check`) and the background scheduler both use the same checker and evaluator pipeline.
 
 ## 2. Database schema
 
@@ -132,4 +132,4 @@ stateDiagram-v2
     Critical --> Normal : up, latency below warning_ms
 ```
 
-Entering **Warning** or **Critical** creates a `warning` or `critical` event. Returning to **Normal** from either creates a `recovered` event. Moving from Critical to Warning is treated as an improvement and also creates a `warning` event, so the log shows the target is still degraded. The exact rules are finalised with the evaluator in Week 2.
+Entering **Warning** or **Critical** creates a `warning` or `critical` event. Returning to **Normal** from either creates a `recovered` event. Moving from Critical to Warning is treated as an improvement and also creates a `warning` event, so the log shows the target is still degraded.

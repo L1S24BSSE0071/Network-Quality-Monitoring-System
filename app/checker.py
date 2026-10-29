@@ -11,7 +11,8 @@ import httpx
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import CheckResult, Target
+from app.evaluator import record_state_change
+from app.models import CheckResult, Target, utc_now
 
 logger = logging.getLogger("nqms.checker")
 
@@ -190,12 +191,14 @@ def run_check_and_store(
         return None
     result = CheckResult(
         target_id=target_id,
+        checked_at=utc_now(),
         is_up=outcome.is_up,
         latency_ms=outcome.latency_ms,
         http_status=outcome.http_status,
         error_message=outcome.error_message,
     )
     db.add(result)
+    record_state_change(db, current, result)
     try:
         db.commit()
     except IntegrityError:
