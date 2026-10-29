@@ -136,7 +136,9 @@ def run_manual_check(target_id: TargetId, db: Session = Depends(get_db)):
     except NotImplementedError as exc:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc))
     if result is None:
-        if db.get(Target, target_id) is None:
+        exists = db.scalar(select(Target.id).where(Target.id == target_id)) is not None
+        db.rollback()
+        if not exists:
             raise HTTPException(status_code=404, detail=f"Target {target_id} was deleted during the check")
         raise HTTPException(status_code=409, detail=f"Target {target_id} was modified during the check")
     return result

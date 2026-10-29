@@ -113,11 +113,12 @@ def start() -> None:
             timezone=timezone.utc,
         )
         with database.SessionLocal() as db:
-            rows = (
-                db.query(Target.id, Target.interval_seconds)
-                .filter(Target.enabled.is_(True), Target.check_type.in_(SUPPORTED_CHECK_TYPES))
-                .all()
-            )
+            rows = db.execute(
+                select(Target.id, Target.interval_seconds).where(
+                    Target.enabled.is_(True),
+                    Target.check_type.in_(SUPPORTED_CHECK_TYPES),
+                )
+            ).all()
         for target_id, interval_seconds in rows:
             _schedule_job(target_id, interval_seconds)
         _scheduler.start()
