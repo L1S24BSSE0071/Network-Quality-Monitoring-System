@@ -6,8 +6,13 @@ from sqlalchemy import select
 
 from app import checker, database
 from app.checker import CheckOutcome
-from app.evaluator import evaluate_state, evaluate_transition, state_from_last_severity
-from app.models import Event
+from app.evaluator import (
+    evaluate_state,
+    evaluate_transition,
+    record_state_change,
+    state_from_last_severity,
+)
+from app.models import CheckResult, Event, Target
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +178,59 @@ def test_event_message_is_truncated_to_500_chars():
     )
     assert decision is not None
     assert len(decision.message) == 500
+
+
+@pytest.mark.parametrize(
+    ("latency_ms", "expected_substr"),
+    [
+        (10000.25, "10000.25 ms"),
+        (1000000.0, "1000000 ms"),
+        (600.0, "600 ms"),
+    ],
+)
+def test_large_and_fractional_latency_formatting_avoids_scientific_notation(
+    latency_ms, expected_substr
+):
+    _, decision = evaluate_transition(
+        "normal",
+        is_up=True,
+        latency_ms=latency_ms,
+        warning_ms=500,
+        critical_ms=2_000_000,
+    )
+    assert decision is not None
+    assert expected_substr in decision.message
+    assert "e+" not in decision.message
+
+
+@pytest.mark.parametrize("bad_latency", [float("nan"), float("inf"), float("-inf"), -5.0])
+def test_non_finite_or_negative_latency_is_treated_as_critical_without_nan_in_message(bad_latency):
+    state, decision = evaluate_transition(
+        "normal",
+        is_up=True,
+        latency_ms=bad_latency,
+        warning_ms=500,
+        critical_ms=1000,
+    )
+    assert state == "critical"
+    assert decision is not None
+    assert decision.severity == "critical"
+    assert decision.latency_ms is None
+    assert decision.message == "Target is down"
+
+
+def test_record_state_change_sets_matching_timestamp_when_checked_at_is_none(make_target):
+    target_json = make_target(warning_ms=100, critical_ms=200)
+    with database.SessionLocal() as db:
+        target = db.get(Target, target_json["id"])
+        result = CheckResult(target_id=target.id, is_up=False, error_message="Timeout")
+        assert result.checked_at is None
+        event = record_state_change(db, target, result)
+        db.add(result)
+        db.commit()
+        assert event is not None
+        assert result.checked_at is not None
+        assert event.occurred_at == result.checked_at
 
 
 # ---------------------------------------------------------------------------
