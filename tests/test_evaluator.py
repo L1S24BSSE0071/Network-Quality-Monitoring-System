@@ -233,6 +233,47 @@ def test_record_state_change_sets_matching_timestamp_when_checked_at_is_none(mak
         assert event.occurred_at == result.checked_at
 
 
+@pytest.mark.parametrize(
+    ("warning_ms", "critical_ms"),
+    [
+        (1000, 1000),
+        (1500, 1000),
+        (0, 1000),
+        (-10, 1000),
+        (True, 1000),
+        (500, False),
+    ],
+)
+def test_evaluate_state_rejects_invalid_thresholds(warning_ms, critical_ms):
+    with pytest.raises(ValueError, match="warning_ms"):
+        evaluate_state(True, 100.0, warning_ms=warning_ms, critical_ms=critical_ms)
+
+
+@pytest.mark.parametrize("bad_previous", ["recovered", "unknown", ""])
+def test_evaluate_transition_rejects_invalid_previous_state(bad_previous):
+    with pytest.raises(ValueError, match="Invalid previous_state"):
+        evaluate_transition(
+            bad_previous,  # type: ignore[arg-type]
+            is_up=True,
+            latency_ms=50.0,
+            warning_ms=500,
+            critical_ms=1000,
+        )
+
+
+def test_blank_error_message_falls_back_to_clean_down_message():
+    _, decision = evaluate_transition(
+        "normal",
+        is_up=False,
+        latency_ms=None,
+        error_message="   ",
+        warning_ms=500,
+        critical_ms=1000,
+    )
+    assert decision is not None
+    assert decision.message == "Target is down"
+
+
 # ---------------------------------------------------------------------------
 # Integration tests with run_check_and_store & manual check API
 # ---------------------------------------------------------------------------

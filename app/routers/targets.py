@@ -134,6 +134,7 @@ def run_manual_check(target_id: TargetId, db: Session = Depends(get_db)):
     try:
         result = run_check_and_store(db, target)
     except NotImplementedError as exc:
+        db.rollback()
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc))
     if result is None:
         exists = db.scalar(select(Target.id).where(Target.id == target_id)) is not None
