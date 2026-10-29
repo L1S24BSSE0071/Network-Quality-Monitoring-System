@@ -269,3 +269,32 @@ def test_non_boolean_enabled_is_rejected(client, make_target, bad_bool):
     assert response.json()["detail"] == [{"field": "enabled", "message": "Must be true or false"}]
     target = make_target()
     assert client.patch(f"/targets/{target['id']}", json={"enabled": bad_bool}).status_code == 422
+
+
+def test_concurrent_patches_cannot_violate_threshold_rules(client, make_target, monkeypatch):
+    """Regression: two concurrent PATCH requests used to read the same snapshot before
+    starting a write transaction, allowing warning_ms >= critical_ms to be committed."""
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    from app.routers import targets as targets_router
+    from app.schemas import validate_thresholds
+
+    target = make_target(warning_ms=200, critical_ms=500)
+    barrier = threading.Barrier(2)
+
+    def slow_validate(w, c):
+        try:
+            barrier.wait(timeout=0.05)
+        except threading.BrokenBarrierError:
+            pass
+        return validate_thresholds(w, c)
+
+    monkeypatch.setattr(targets_router, "validate_thresholds", slow_validate)
+    with ThreadPoolExecutor(2) as pool:
+        f1 = pool.submit(client.patch, f"/targets/{target['id']}", json={"critical_ms": 300})
+        f2 = pool.submit(client.patch, f"/targets/{target['id']}", json={"warning_ms": 400})
+        codes = sorted([f1.result().status_code, f2.result().status_code])
+
+    assert codes == [200, 422]
+    after = client.get(f"/targets/{target['id']}").json()
+    assert after["warning_ms"] < after["critical_ms"]
