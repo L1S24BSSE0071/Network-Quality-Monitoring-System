@@ -2,7 +2,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
-from sqlalchemy import delete, select
+from sqlalchemy import bindparam, delete, select
 from sqlalchemy.orm import Session
 
 from app import scheduler
@@ -28,6 +28,21 @@ TargetId = Annotated[int, Path(ge=1, le=2_147_483_647, description="Target id")]
 # thresholds) are picked up by the next scheduled check without triggering a new one.
 _SCHEDULE_FIELDS = {"host_or_url", "check_type", "interval_seconds", "enabled"}
 
+_LIST_TARGETS_QUERY = select(Target).order_by(Target.id)
+_MANUAL_CHECK_TARGET_QUERY = select(Target.host_or_url, Target.check_type).where(
+    Target.id == bindparam("target_id")
+)
+_TARGET_EXISTS_QUERY = select(Target.id).where(Target.id == bindparam("target_id"))
+_LIST_RESULTS_QUERY = (
+    select(CheckResult)
+    .where(CheckResult.target_id == bindparam("target_id"))
+    .order_by(CheckResult.checked_at.desc(), CheckResult.id.desc())
+    .limit(bindparam("limit"))
+)
+_DELETE_RESULTS_STMT = delete(CheckResult).where(CheckResult.target_id == bindparam("target_id"))
+_DELETE_EVENTS_STMT = delete(Event).where(Event.target_id == bindparam("target_id"))
+_DELETE_TARGET_STMT = delete(Target).where(Target.id == bindparam("target_id"))
+
 
 def _get_target_or_404(target_id: int, db: Session) -> Target:
     target = db.get(Target, target_id)
@@ -52,7 +67,7 @@ def create_target(payload: TargetCreate, db: Session = Depends(get_db)):
 @router.get("", response_model=list[TargetRead])
 def list_targets(db: Session = Depends(get_db)):
     """List all targets, oldest first."""
-    return db.scalars(select(Target).order_by(Target.id)).all()
+    return db.scalars(_LIST_TARGETS_QUERY).all()
 
 
 @router.get("/{target_id}", response_model=TargetRead)
@@ -111,12 +126,13 @@ def update_target(target_id: TargetId, payload: TargetUpdate, db: Session = Depe
 @router.delete("/{target_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_target(target_id: TargetId, db: Session = Depends(get_db)):
     """Delete a target together with its check results and events."""
+    params = {"target_id": target_id}
     db.connection().exec_driver_sql("BEGIN IMMEDIATE")
     # Delete the history and target with bulk statements instead of loading ORM rows,
     # and so that it also works on databases created before ON DELETE CASCADE was added.
-    db.execute(delete(CheckResult).where(CheckResult.target_id == target_id))
-    db.execute(delete(Event).where(Event.target_id == target_id))
-    deleted = db.execute(delete(Target).where(Target.id == target_id)).rowcount
+    db.execute(_DELETE_RESULTS_STMT, params)
+    db.execute(_DELETE_EVENTS_STMT, params)
+    deleted = db.execute(_DELETE_TARGET_STMT, params).rowcount
     if not deleted:
         db.rollback()
         raise HTTPException(status_code=404, detail=f"Target {target_id} not found")
@@ -133,14 +149,18 @@ def run_manual_check(target_id: TargetId, db: Session = Depends(get_db)):
     A failed check (timeout, DNS error...) is still a valid result: it is stored
     with is_up=false and an error_message, and returned with status 201.
     """
-    target = _get_target_or_404(target_id, db)
+    row = db.execute(_MANUAL_CHECK_TARGET_QUERY, {"target_id": target_id}).one_or_none()
+    if row is None:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=f"Target {target_id} not found")
+    stub = Target(id=target_id, host_or_url=row[0], check_type=row[1])
     try:
-        result = run_check_and_store(db, target)
+        result = run_check_and_store(db, stub)
     except NotImplementedError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc))
     if result is None:
-        exists = db.scalar(select(Target.id).where(Target.id == target_id)) is not None
+        exists = db.scalar(_TARGET_EXISTS_QUERY, {"target_id": target_id}) is not None
         db.rollback()
         if not exists:
             raise HTTPException(status_code=404, detail=f"Target {target_id} was deleted during the check")
@@ -155,15 +175,11 @@ def list_results(
     db: Session = Depends(get_db),
 ):
     """Most recent check results for a target, newest first."""
-    query = (
-        select(CheckResult)
-        .where(CheckResult.target_id == target_id)
-        .order_by(CheckResult.checked_at.desc(), CheckResult.id.desc())
-        .limit(limit)
-    )
-    results = db.scalars(query).all()
+    results = db.scalars(_LIST_RESULTS_QUERY, {"target_id": target_id, "limit": limit}).all()
     if not results:
         # Foreign keys guarantee a target exists when results are present; only query
         # the targets table when there are no results (to distinguish empty vs 404).
-        _get_target_or_404(target_id, db)
+        if db.scalar(_TARGET_EXISTS_QUERY, {"target_id": target_id}) is None:
+            db.rollback()
+            raise HTTPException(status_code=404, detail=f"Target {target_id} not found")
     return results
