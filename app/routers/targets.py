@@ -63,8 +63,12 @@ def get_target(target_id: TargetId, db: Session = Depends(get_db)):
 @router.patch("/{target_id}", response_model=TargetRead)
 def update_target(target_id: TargetId, payload: TargetUpdate, db: Session = Depends(get_db)):
     """Edit a target. Only the fields sent are changed."""
-    target = _get_target_or_404(target_id, db)
     changes = payload.model_dump(exclude_unset=True)
+    if changes:
+        # Acquire SQLite's write lock before reading so two concurrent PATCH requests
+        # cannot validate against a stale snapshot and commit conflicting fields.
+        db.connection().exec_driver_sql("BEGIN IMMEDIATE")
+    target = _get_target_or_404(target_id, db)
 
     # Re-validate cross-field rules against the merged values, e.g. sending only
     # warning_ms must keep it below the stored critical_ms.
@@ -89,6 +93,7 @@ def update_target(target_id: TargetId, payload: TargetUpdate, db: Session = Depe
         field for field, value in changes.items() if getattr(target, field) != value
     }
     if not changed_fields:
+        db.rollback()
         return target
 
     for field in changed_fields:
@@ -103,6 +108,7 @@ def update_target(target_id: TargetId, payload: TargetUpdate, db: Session = Depe
 @router.delete("/{target_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_target(target_id: TargetId, db: Session = Depends(get_db)):
     """Delete a target together with its check results and events."""
+    db.connection().exec_driver_sql("BEGIN IMMEDIATE")
     target = _get_target_or_404(target_id, db)
     # Delete the history with two bulk statements instead of loading every row, and so
     # that it also works on databases created before ON DELETE CASCADE was added.

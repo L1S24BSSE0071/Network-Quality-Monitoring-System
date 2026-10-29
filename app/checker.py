@@ -177,6 +177,7 @@ def run_check_and_store(
     # slow targets would use up the pool and make every API request wait.
     db.rollback()
     outcome = perform_http_check(url)
+    db.connection().exec_driver_sql("BEGIN IMMEDIATE")
     current = db.get(Target, target_id)
     if (
         current is None
