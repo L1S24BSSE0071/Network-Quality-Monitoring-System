@@ -38,7 +38,7 @@ def create_target(payload: TargetCreate, db: Session = Depends(get_db)):
     db.add(target)
     db.commit()
     db.refresh(target)
-    scheduler.sync_target(target)  # start checking it in the background
+    scheduler.sync_target(target.id, db)  # start checking it in the background
     return target
 
 
@@ -76,7 +76,7 @@ def update_target(target_id: TargetId, payload: TargetUpdate, db: Session = Depe
     db.commit()
     db.refresh(target)
     if _SCHEDULE_FIELDS & changes.keys():
-        scheduler.sync_target(target)  # apply a new interval, enable/disable, etc.
+        scheduler.sync_target(target_id, db)  # apply a new interval, enable/disable, etc.
     return target
 
 

@@ -125,5 +125,5 @@ Priority follows the project plan: **M** = Must have, **S** = Should have, **O**
 - A state change is detected only at check intervals, so very short outages between checks can be missed.
 - Timestamps are stored and returned in UTC.
 - Response time is measured until the response headers arrive; the page body is not downloaded.
-- The 10-second timeout applies to each stage of a request (connect, wait for response), not to the whole check, and DNS look-ups are not covered by it.
+- Each check is abandoned and recorded as timed out about 11 seconds after it starts (the 10-second timeout plus a 1-second grace), even if the operating system's DNS look-up hangs. The stuck look-up finishes in the background and its result is discarded.
 - Check history is not pruned automatically, so the database grows over time.- Ping support depends on the operating system.

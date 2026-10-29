@@ -141,10 +141,20 @@ def test_valid_hosts_are_accepted(client, host_or_url):
         "http://user@example.com",
         "http://-bad.example.com",
         "http://exa mple.com",
+        "http://example.com:0/",
+        "http://example.com/a b",
+        "http://example.com/\x00",
     ],
 )
 def test_invalid_hosts_are_rejected(client, host_or_url):
     assert client.post("/targets", json={**VALID, "host_or_url": host_or_url}).status_code == 422
+
+
+@pytest.mark.parametrize("bad_name", ["a\x00b", "a\nb", "a\rb", "a\tb"])
+def test_control_characters_in_name_are_rejected(client, make_target, bad_name):
+    assert client.post("/targets", json={**VALID, "name": bad_name}).status_code == 422
+    target = make_target()
+    assert client.patch(f"/targets/{target['id']}", json={"name": bad_name}).status_code == 422
 
 
 def test_ping_target_accepts_ips_and_rejects_bad_ones(client):
@@ -169,3 +179,22 @@ def test_unknown_fields_are_rejected_on_create_and_edit(client, make_target):
 def test_credentials_in_url_have_a_clear_message(client):
     body = client.post("/targets", json={**VALID, "host_or_url": "http://user:pass@example.com"}).json()
     assert body["detail"] == [{"field": "(request)", "message": "URL must not contain a user name or password"}]
+
+
+def test_malformed_json_and_non_object_bodies_have_clear_messages(client):
+    bad_json = client.post("/targets", content=b"{bad json", headers={"content-type": "application/json"})
+    assert bad_json.status_code == 422
+    assert bad_json.json()["detail"] == [{"field": "(request)", "message": "Request body is not valid JSON"}]
+
+    for raw in (b"[1, 2, 3]", b"null", b"\"text\""):
+        response = client.post("/targets", content=raw, headers={"content-type": "application/json"})
+        assert response.status_code == 422
+        assert response.json()["detail"] == [{"field": "(request)", "message": "Request body must be a JSON object"}]
+
+
+def test_default_database_is_in_the_project_folder_not_the_current_folder():
+    from app import database
+
+    path = database._DEFAULT_DB_PATH
+    assert path.is_absolute() and path.name == "monitoring.db"
+    assert (path.parent / "app" / "main.py").exists()
