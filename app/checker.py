@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import bindparam, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -43,6 +43,15 @@ _LAST_SEVERITY_SUBQ = (
     .correlate(Target)
     .scalar_subquery()
 )
+
+_POST_CHECK_TARGET_QUERY = select(
+    Target.host_or_url,
+    Target.check_type,
+    Target.enabled,
+    Target.warning_ms,
+    Target.critical_ms,
+    _LAST_SEVERITY_SUBQ,
+).where(Target.id == bindparam("target_id"))
 
 
 @dataclass
@@ -187,20 +196,12 @@ def run_check_and_store(
     # End the read transaction first. Otherwise this session keeps its pooled database
     # connection checked out for the whole (possibly 10 s) network call, and a few dozen
     # slow targets would use up the pool and make every API request wait.
-    db.expunge_all()  # detach ORM objects before rollback so their attributes are not expired
+    if db.identity_map:
+        db.expunge_all()  # detach ORM objects before rollback so their attributes are not expired
     db.rollback()
     outcome = perform_http_check(url)
     db.connection().exec_driver_sql("BEGIN IMMEDIATE")
-    row = db.execute(
-        select(
-            Target.host_or_url,
-            Target.check_type,
-            Target.enabled,
-            Target.warning_ms,
-            Target.critical_ms,
-            _LAST_SEVERITY_SUBQ,
-        ).where(Target.id == target_id)
-    ).one_or_none()
+    row = db.execute(_POST_CHECK_TARGET_QUERY, {"target_id": target_id}).one_or_none()
     if (
         row is None
         or row[0] != url

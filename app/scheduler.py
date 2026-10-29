@@ -7,7 +7,7 @@ from typing import Optional
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy import select
+from sqlalchemy import bindparam, select
 
 from app import database
 from app.checker import SUPPORTED_CHECK_TYPES, run_check_and_store
@@ -21,6 +21,18 @@ _scheduler: Optional[BackgroundScheduler] = None
 
 # Serialises changes to the schedule. Reentrant because sync_target() calls remove_target().
 _lock = threading.RLock()
+
+_SCHEDULED_TARGET_QUERY = select(Target.host_or_url, Target.check_type).where(
+    Target.id == bindparam("target_id"),
+    Target.enabled.is_(True),
+    Target.check_type.in_(SUPPORTED_CHECK_TYPES),
+)
+
+_SYNC_TARGET_QUERY = select(Target.interval_seconds).where(
+    Target.id == bindparam("target_id"),
+    Target.enabled.is_(True),
+    Target.check_type.in_(SUPPORTED_CHECK_TYPES),
+)
 
 
 def _job_id(target_id: int) -> str:
@@ -36,18 +48,15 @@ def run_scheduled_check(target_id: int) -> None:
     try:
         for _ in range(3):
             with database.SessionLocal() as db:
-                target = db.get(Target, target_id)
-                if (
-                    target is None
-                    or not target.enabled
-                    or target.check_type not in SUPPORTED_CHECK_TYPES
-                ):
+                row = db.execute(_SCHEDULED_TARGET_QUERY, {"target_id": target_id}).one_or_none()
+                if row is None:
                     # Deleted, disabled, or switched to an unsupported check type since the
                     # job was scheduled: release the DB connection before taking the lock.
                     db.rollback()
                     remove_target(target_id)
                     return
-                if run_check_and_store(db, target, require_enabled=True) is not None:
+                stub = Target(id=target_id, host_or_url=row[0], check_type=row[1])
+                if run_check_and_store(db, stub, require_enabled=True) is not None:
                     return
     except Exception:
         logger.exception("Scheduled check failed for target %s", target_id)
@@ -85,13 +94,7 @@ def sync_target(target_id: int) -> None:
         if not is_running():
             return
         with database.SessionLocal() as db:
-            interval_seconds = db.scalar(
-                select(Target.interval_seconds).where(
-                    Target.id == target_id,
-                    Target.enabled.is_(True),
-                    Target.check_type.in_(SUPPORTED_CHECK_TYPES),
-                )
-            )
+            interval_seconds = db.scalar(_SYNC_TARGET_QUERY, {"target_id": target_id})
         if interval_seconds is None:
             remove_target(target_id)
         else:

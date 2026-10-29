@@ -3,7 +3,7 @@ import math
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-from sqlalchemy import select
+from sqlalchemy import bindparam, select
 from sqlalchemy.orm import Session
 
 from app.models import CheckResult, Event, Target, utc_now
@@ -15,6 +15,13 @@ EventSeverity = Literal["warning", "critical", "recovered"]
 _VALID_STATES = {"normal", "warning", "critical"}
 _VALID_SEVERITIES = {None, "recovered", "warning", "critical"}
 _UNSET = object()
+
+_LAST_EVENT_SEVERITY_QUERY = (
+    select(Event.severity)
+    .where(Event.target_id == bindparam("target_id"))
+    .order_by(Event.occurred_at.desc(), Event.id.desc())
+    .limit(1)
+)
 
 
 @dataclass
@@ -175,12 +182,7 @@ def record_state_change(
     """
     target_id = result.target_id if result.target_id is not None else target.id
     if last_severity is _UNSET:
-        last_severity = db.scalar(
-            select(Event.severity)
-            .where(Event.target_id == target_id)
-            .order_by(Event.occurred_at.desc(), Event.id.desc())
-            .limit(1)
-        )
+        last_severity = db.scalar(_LAST_EVENT_SEVERITY_QUERY, {"target_id": target_id})
     previous_state = state_from_last_severity(last_severity)  # type: ignore[arg-type]
     result.latency_ms = _normalize_latency(result.latency_ms)
     if result.latency_ms is None and result.is_up:
