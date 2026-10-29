@@ -114,7 +114,7 @@ def _run_http_check(
             is_up=False,
             latency_ms=latency_ms,
             http_status=status_code,
-            error_message=f"HTTP {status_code} {reason}".strip(),
+            error_message=f"HTTP {status_code} {reason}".strip()[:500],
         )
     return CheckOutcome(is_up=True, latency_ms=latency_ms, http_status=status_code)
 

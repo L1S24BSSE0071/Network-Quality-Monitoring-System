@@ -2,16 +2,21 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
-from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app import scheduler
 from app.checker import SUPPORTED_CHECK_TYPES, run_check_and_store
 from app.database import get_db
-from app.errors import format_errors
 from app.models import CheckResult, Event, Target
-from app.schemas import CheckResultRead, TargetCreate, TargetRead, TargetUpdate
+from app.schemas import (
+    CheckResultRead,
+    TargetCreate,
+    TargetRead,
+    TargetUpdate,
+    validate_host_or_url,
+    validate_thresholds,
+)
 
 router = APIRouter(prefix="/targets", tags=["targets"])
 
@@ -61,15 +66,23 @@ def update_target(target_id: TargetId, payload: TargetUpdate, db: Session = Depe
     target = _get_target_or_404(target_id, db)
     changes = payload.model_dump(exclude_unset=True)
 
-    # Re-validate the merged result so cross-field rules still hold, e.g. sending
-    # only warning_ms must keep it below the stored critical_ms.
-    current = TargetRead.model_validate(target).model_dump(exclude={"id", "created_at"})
+    # Re-validate cross-field rules against the merged values, e.g. sending only
+    # warning_ms must keep it below the stored critical_ms.
     try:
-        TargetCreate(**{**current, **changes})
-    except ValidationError as exc:
+        if "host_or_url" in changes or "check_type" in changes:
+            validate_host_or_url(
+                changes.get("host_or_url", target.host_or_url),
+                changes.get("check_type", target.check_type),
+            )
+        if "warning_ms" in changes or "critical_ms" in changes:
+            validate_thresholds(
+                changes.get("warning_ms", target.warning_ms),
+                changes.get("critical_ms", target.critical_ms),
+            )
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=format_errors(exc.errors()),
+            detail=[{"field": "(request)", "message": str(exc)}],
         )
 
     changed_fields = {

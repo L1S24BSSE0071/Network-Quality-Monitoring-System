@@ -35,8 +35,10 @@ def run_scheduled_check(target_id: int) -> None:
     try:
         with database.SessionLocal() as db:
             target = db.get(Target, target_id)
-            if target is None or not target.enabled:
-                # Deleted or disabled since the job was scheduled: stop checking it.
+            if target is None or not target.enabled or target.check_type not in SUPPORTED_CHECK_TYPES:
+                # Deleted, disabled, or switched to an unsupported check type since the
+                # job was scheduled: release the DB connection before taking the lock.
+                db.rollback()
                 remove_target(target_id)
                 return
             run_check_and_store(db, target, require_enabled=True)
@@ -77,11 +79,14 @@ def sync_target(target_id: int) -> None:
             return
         with database.SessionLocal() as db:
             target = db.get(Target, target_id)
-            if target is None or not target.enabled or target.check_type not in SUPPORTED_CHECK_TYPES:
-                remove_target(target_id)
-                return
-            interval_seconds = target.interval_seconds
-        _schedule_job(target_id, interval_seconds)
+            if target is not None and target.enabled and target.check_type in SUPPORTED_CHECK_TYPES:
+                interval_seconds: Optional[int] = target.interval_seconds
+            else:
+                interval_seconds = None
+        if interval_seconds is None:
+            remove_target(target_id)
+        else:
+            _schedule_job(target_id, interval_seconds)
 
 
 def remove_target(target_id: int) -> None:

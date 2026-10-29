@@ -33,6 +33,9 @@ def test_error_status_is_down_but_keeps_latency(status, text):
     assert outcome.http_status == status and outcome.latency_ms is not None
     assert outcome.error_message == text
 
+    long_outcome = check(lambda request: httpx.Response(500, extensions={"reason_phrase": b"X" * 600}))
+    assert len(long_outcome.error_message) == 500
+
 
 def test_timeout_is_a_failure_not_an_exception():
     def handler(request):
