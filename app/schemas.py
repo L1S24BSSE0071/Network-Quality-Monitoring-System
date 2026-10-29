@@ -47,8 +47,8 @@ def _is_valid_host(host: str) -> bool:
 
 def validate_host_or_url(value: str, check_type: str) -> str:
     """Validate the host/URL for the given check type; return it unchanged if valid."""
-    if any(ord(ch) <= 32 or ord(ch) == 127 for ch in value):
-        raise ValueError("Host or URL must not contain spaces or control characters")
+    if any(ord(ch) <= 32 or ord(ch) == 127 or ch == "\\" for ch in value):
+        raise ValueError("Host or URL must not contain spaces, backslashes or control characters")
     if check_type == "http":
         parsed = urlparse(value)
         if parsed.scheme not in ("http", "https"):
@@ -58,7 +58,7 @@ def validate_host_or_url(value: str, check_type: str) -> str:
             port = parsed.port  # raises ValueError for a malformed or out-of-range port
         except ValueError:
             raise ValueError("URL has an invalid port")
-        if port == 0:
+        if port == 0 or parsed.netloc.endswith(":"):
             raise ValueError("URL has an invalid port")
         if not hostname or not _is_valid_host(hostname):
             raise ValueError("URL does not contain a valid host name")
@@ -159,13 +159,29 @@ class TargetUpdate(BaseModel):
     @field_validator("name", "host_or_url", mode="before")
     @classmethod
     def strip_whitespace(cls, value):
+        if value is None:
+            raise ValueError("Must be text")
         return value.strip() if isinstance(value, str) else value
 
     @field_validator("interval_seconds", "warning_ms", "critical_ms", mode="before")
     @classmethod
-    def reject_bool_for_int(cls, value):
-        if isinstance(value, bool):
+    def reject_bool_or_null_for_int(cls, value):
+        if value is None or isinstance(value, bool):
             raise ValueError("Must be a whole number")
+        return value
+
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def reject_null_for_bool(cls, value):
+        if value is None:
+            raise ValueError("Must be true or false")
+        return value
+
+    @field_validator("check_type", mode="before")
+    @classmethod
+    def reject_null_for_check_type(cls, value):
+        if value is None:
+            raise ValueError("Must be 'http' or 'ping'")
         return value
 
     @field_validator("name")

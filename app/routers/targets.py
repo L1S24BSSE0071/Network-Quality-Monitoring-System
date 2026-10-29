@@ -114,8 +114,10 @@ def run_manual_check(target_id: TargetId, db: Session = Depends(get_db)):
         result = run_check_and_store(db, target)
     except NotImplementedError as exc:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc))
-    if result is None:  # the target was deleted while the check was running
-        raise HTTPException(status_code=404, detail=f"Target {target_id} was deleted during the check")
+    if result is None:
+        if db.get(Target, target_id) is None:
+            raise HTTPException(status_code=404, detail=f"Target {target_id} was deleted during the check")
+        raise HTTPException(status_code=409, detail=f"Target {target_id} was modified during the check")
     return result
 
 
