@@ -98,12 +98,15 @@ def test_check_failure_does_not_break_the_scheduler(client, make_target, running
 
 
 def test_job_for_a_deleted_target_removes_itself(client, make_target, running_scheduler):
+    from app import database
+
     target = make_target(enabled=True, interval_seconds=3600)
     job = f"target-{target['id']}"
     assert wait_for(lambda: job in job_ids())
     client.delete(f"/targets/{target['id']}")
     scheduler.run_scheduled_check(target["id"])  # must not raise and must leave no job
     assert job not in job_ids()
+    assert database.engine.pool.checkedout() == 0
 
 
 def test_sync_applies_the_latest_stored_state_whatever_order_calls_arrive(client, make_target, running_scheduler):

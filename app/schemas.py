@@ -28,21 +28,23 @@ def _is_valid_host(host: str) -> bool:
     Per RFC 1123 / RFC 3696, the top-level label of a domain name cannot be all digits,
     which also rejects malformed numeric addresses such as 256.1.1.1 or example.123.
     """
-    if not host:
+    if not host or "%" in host:
         return False
     try:
         ipaddress.ip_address(host)
         return True
     except ValueError:
         pass
-    if _NUMERIC_HOST_RE.match(host):
-        return False
     host = host.removesuffix(".")  # fully qualified name with a trailing dot
-    if not host or host.rsplit(".", 1)[-1].isdigit():
+    if not host:
         return False
     try:
         host = host.encode("idna").decode("ascii")
+        if "xn--" in host.lower():
+            host.lower().encode("ascii").decode("idna")
     except UnicodeError:
+        return False
+    if _NUMERIC_HOST_RE.match(host) or host.rsplit(".", 1)[-1].isdigit():
         return False
     return bool(_HOSTNAME_RE.match(host))
 
@@ -202,12 +204,19 @@ class TargetUpdate(BaseModel):
         return _check_no_control_chars(value)
 
 
-class TargetRead(TargetBase):
+class TargetRead(BaseModel):
     """Target as returned by the API."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    name: str
+    host_or_url: str
+    check_type: CheckType
+    interval_seconds: int
+    warning_ms: int
+    critical_ms: int
+    enabled: bool
     created_at: datetime
 
 

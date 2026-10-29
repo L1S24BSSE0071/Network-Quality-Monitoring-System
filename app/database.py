@@ -44,10 +44,11 @@ def init_db() -> None:
     create_all only creates missing tables, so indexes added in later versions are
     created explicitly for databases that already exist.
     """
-    Base.metadata.create_all(bind=engine)
-    for table in Base.metadata.sorted_tables:
-        for index in table.indexes:
-            index.create(bind=engine, checkfirst=True)
+    with engine.begin() as conn:
+        Base.metadata.create_all(bind=conn)
+        for table in Base.metadata.sorted_tables:
+            for index in table.indexes:
+                index.create(bind=conn, checkfirst=True)
 
 
 def get_db():

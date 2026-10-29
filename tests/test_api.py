@@ -135,6 +135,7 @@ def test_valid_hosts_are_accepted(client, host_or_url):
     "host_or_url",
     [
         "http://256.1.1.1",
+        "http://256\u30021\u30021\u30021",
         "http://999.999.999.999/",
         "http://1.2.3",
         "http://user:pass@example.com",
@@ -144,12 +145,15 @@ def test_valid_hosts_are_accepted(client, host_or_url):
         "http://[::1",
         "http://[127.0.0.1]/",
         "http://[example.com]/",
+        "http://[fe80::1%eth0]/",
         "http://\uff0fexample.com",
         "http://-bad.example.com",
         "http://exa mple.com",
         "http://example.com:0/",
         "http://example.com:/",
         "http://example.123",
+        "http://example\u3002123",
+        "http://xn--abc.com",
         "http://test.99999/",
         "http://example.com/a b",
         "http://example.com/a\\b",
@@ -172,6 +176,8 @@ def test_ping_target_accepts_ips_and_rejects_bad_ones(client):
     assert client.post("/targets", json={**ok, "host_or_url": "8.8.8.8"}).status_code == 201
     assert client.post("/targets", json={**ok, "host_or_url": "::1"}).status_code == 201
     assert client.post("/targets", json={**ok, "host_or_url": "256.256.256.256"}).status_code == 422
+    assert client.post("/targets", json={**ok, "host_or_url": "256\u30021\u30021\u30021"}).status_code == 422
+    assert client.post("/targets", json={**ok, "host_or_url": "fe80::1%a?b"}).status_code == 422
 
 
 def test_unknown_fields_are_rejected_on_create_and_edit(client, make_target):
