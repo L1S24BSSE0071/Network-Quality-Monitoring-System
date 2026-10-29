@@ -48,6 +48,20 @@ def is_running() -> bool:
     return _scheduler is not None and _scheduler.running
 
 
+def _schedule_job(target_id: int, interval_seconds: int) -> None:
+    _scheduler.add_job(
+        run_scheduled_check,
+        trigger=IntervalTrigger(seconds=interval_seconds, timezone=timezone.utc),
+        args=[target_id],
+        id=_job_id(target_id),
+        replace_existing=True,
+        max_instances=1,      # never run two checks of the same target at once
+        coalesce=True,        # if runs were missed, run once rather than in a burst
+        misfire_grace_time=30,
+        next_run_time=datetime.now(timezone.utc),  # first check starts immediately
+    )
+
+
 def sync_target(target_id: int) -> None:
     """Make the schedule match the target as it is stored in the database right now.
 
@@ -67,17 +81,7 @@ def sync_target(target_id: int) -> None:
                 remove_target(target_id)
                 return
             interval_seconds = target.interval_seconds
-        _scheduler.add_job(
-            run_scheduled_check,
-            trigger=IntervalTrigger(seconds=interval_seconds, timezone=timezone.utc),
-            args=[target_id],
-            id=_job_id(target_id),
-            replace_existing=True,
-            max_instances=1,      # never run two checks of the same target at once
-            coalesce=True,        # if runs were missed, run once rather than in a burst
-            misfire_grace_time=30,
-            next_run_time=datetime.now(timezone.utc),  # first check starts immediately
-        )
+        _schedule_job(target_id, interval_seconds)
 
 
 def remove_target(target_id: int) -> None:
@@ -102,9 +106,13 @@ def start() -> None:
         )
         _scheduler.start()
         with database.SessionLocal() as db:
-            enabled_ids = [row.id for row in db.query(Target.id).filter(Target.enabled.is_(True))]
-        for target_id in enabled_ids:
-            sync_target(target_id)
+            rows = (
+                db.query(Target.id, Target.interval_seconds)
+                .filter(Target.enabled.is_(True), Target.check_type.in_(SUPPORTED_CHECK_TYPES))
+                .all()
+            )
+        for target_id, interval_seconds in rows:
+            _schedule_job(target_id, interval_seconds)
         logger.info("Scheduler started with %d target(s)", len(_scheduler.get_jobs()))
 
 

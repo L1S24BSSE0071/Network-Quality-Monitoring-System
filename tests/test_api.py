@@ -142,7 +142,9 @@ def test_valid_hosts_are_accepted(client, host_or_url):
         "http://-bad.example.com",
         "http://exa mple.com",
         "http://example.com:0/",
+        "http://example.com:/",
         "http://example.com/a b",
+        "http://example.com/a\\b",
         "http://example.com/\x00",
     ],
 )
@@ -218,3 +220,14 @@ def test_huge_thresholds_and_booleans_for_ints_are_rejected(client, make_target,
     target = make_target()
     if None not in overrides.values():
         assert client.patch(f"/targets/{target['id']}", json=overrides).status_code == 422
+
+
+def test_patch_rejects_explicit_null_values_upfront(client, make_target):
+    target = make_target()
+    response = client.patch(
+        f"/targets/{target['id']}",
+        json={"name": None, "interval_seconds": None, "enabled": None, "check_type": None},
+    )
+    assert response.status_code == 422
+    fields = {err["field"] for err in response.json()["detail"]}
+    assert fields == {"name", "interval_seconds", "enabled", "check_type"}
