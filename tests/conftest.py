@@ -1,10 +1,12 @@
 """Shared test setup: a throwaway database and a client without background checking."""
 import os
+import shutil
 import tempfile
+from pathlib import Path
 
 # Must be set before the app is imported so the app uses the throwaway database.
 _TEST_DIR = tempfile.mkdtemp(prefix="nqms-tests-")
-os.environ["NQMS_DATABASE_URL"] = f"sqlite:///{os.path.join(_TEST_DIR, 'test.db')}"
+os.environ["NQMS_DATABASE_URL"] = f"sqlite:///{(Path(_TEST_DIR) / 'test.db').as_posix()}"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,6 +25,8 @@ def client():
             yield test_client
     finally:
         scheduler.start = original_start
+        database.engine.dispose()
+        shutil.rmtree(_TEST_DIR, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)

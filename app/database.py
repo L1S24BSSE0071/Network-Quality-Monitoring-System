@@ -9,7 +9,7 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 # (a relative path would silently create a second, empty database in the current folder).
 # Can be overridden with the NQMS_DATABASE_URL environment variable (used by tests).
 _DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "monitoring.db"
-DATABASE_URL = os.getenv("NQMS_DATABASE_URL", f"sqlite:///{_DEFAULT_DB_PATH.as_posix()}")
+DATABASE_URL = os.getenv("NQMS_DATABASE_URL", "").strip() or f"sqlite:///{_DEFAULT_DB_PATH.as_posix()}"
 
 # check_same_thread=False lets FastAPI and the scheduler threads share SQLite.
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})

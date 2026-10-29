@@ -33,7 +33,7 @@ def wait_for(condition, timeout=5.0):
     while time.time() < deadline:
         if condition():
             return True
-        time.sleep(0.05)
+        time.sleep(0.01)
     return False
 
 
@@ -82,17 +82,20 @@ def test_rename_does_not_trigger_a_new_check(client, make_target, running_schedu
     client.patch(f"/targets/{target['id']}", json={"name": "Renamed", "warning_ms": 200})
     client.patch(f"/targets/{target['id']}", json={"interval_seconds": 3600, "enabled": True})
     client.patch(f"/targets/{target['id']}", json={})
-    time.sleep(0.5)
+    time.sleep(0.15)
     assert result_count(client, target["id"]) == 1
 
 
 def test_check_failure_does_not_break_the_scheduler(client, make_target, running_scheduler, monkeypatch):
+    called = []
+
     def explode(url, **kw):
+        called.append(url)
         raise RuntimeError("unexpected")
 
     monkeypatch.setattr(checker, "perform_http_check", explode)
     target = make_target(enabled=True, interval_seconds=3600)
-    time.sleep(0.5)  # the job ran and raised; it must have been swallowed and logged
+    assert wait_for(lambda: len(called) == 1)  # the job ran and raised; it must be swallowed and logged
     assert scheduler.is_running()
     assert f"target-{target['id']}" in job_ids()
 

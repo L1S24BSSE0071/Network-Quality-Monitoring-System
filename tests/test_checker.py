@@ -169,14 +169,15 @@ def test_check_is_abandoned_at_the_deadline_when_dns_hangs(monkeypatch):
     import socket
     import time
 
-    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: time.sleep(5))
+    monkeypatch.setattr(checker, "DEADLINE_GRACE_SECONDS", 0.1)
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: time.sleep(0.6))
     started = time.perf_counter()
-    outcome = checker.perform_http_check("http://hung-dns.test/", timeout_seconds=1)
+    outcome = checker.perform_http_check("http://hung-dns.test/", timeout_seconds=0.1)
     elapsed = time.perf_counter() - started
 
-    assert elapsed < 3, f"check took {elapsed:.1f} s"
+    assert elapsed < 0.45, f"check took {elapsed:.2f} s"
     assert not outcome.is_up and outcome.latency_ms is None
-    assert outcome.error_message == "Timed out after 1 seconds"
+    assert outcome.error_message == "Timed out after 0.1 seconds"
 
 
 def test_no_database_connection_is_held_during_the_network_call(client, make_target, monkeypatch):
