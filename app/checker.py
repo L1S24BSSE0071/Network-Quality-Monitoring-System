@@ -8,11 +8,12 @@ from dataclasses import dataclass
 from typing import Optional
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.evaluator import record_state_change
-from app.models import CheckResult, Target, utc_now
+from app.models import CheckResult, Event, Target, utc_now
 
 logger = logging.getLogger("nqms.checker")
 
@@ -176,19 +177,38 @@ def run_check_and_store(
     # End the read transaction first. Otherwise this session keeps its pooled database
     # connection checked out for the whole (possibly 10 s) network call, and a few dozen
     # slow targets would use up the pool and make every API request wait.
+    db.expunge_all()  # detach ORM objects before rollback so their attributes are not expired
     db.rollback()
-    db.expunge_all()  # clear cached ORM objects when expire_on_commit=False
     outcome = perform_http_check(url)
     db.connection().exec_driver_sql("BEGIN IMMEDIATE")
-    current = db.get(Target, target_id, populate_existing=True)
+    last_severity_subq = (
+        select(Event.severity)
+        .where(Event.target_id == Target.id)
+        .order_by(Event.occurred_at.desc(), Event.id.desc())
+        .limit(1)
+        .correlate(Target)
+        .scalar_subquery()
+    )
+    row = db.execute(
+        select(
+            Target.host_or_url,
+            Target.check_type,
+            Target.enabled,
+            Target.warning_ms,
+            Target.critical_ms,
+            last_severity_subq,
+        ).where(Target.id == target_id)
+    ).one_or_none()
     if (
-        current is None
-        or current.host_or_url != url
-        or current.check_type != check_type
-        or (require_enabled and not current.enabled)
+        row is None
+        or row[0] != url
+        or row[1] != check_type
+        or (require_enabled and not row[2])
     ):
         db.rollback()
         return None
+    target.warning_ms = row[3]
+    target.critical_ms = row[4]
     result = CheckResult(
         target_id=target_id,
         checked_at=utc_now(),
@@ -197,7 +217,7 @@ def run_check_and_store(
         http_status=outcome.http_status,
         error_message=outcome.error_message,
     )
-    record_state_change(db, current, result)
+    record_state_change(db, target, result, last_severity=row[5])
     db.add(result)
     try:
         db.commit()
