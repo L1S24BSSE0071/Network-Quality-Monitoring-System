@@ -7,11 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import CheckResult, Event, Target, utc_now
+from app.schemas import MAX_THRESHOLD_MS
 
 TargetState = Literal["normal", "warning", "critical"]
 EventSeverity = Literal["warning", "critical", "recovered"]
 
 _VALID_STATES = {"normal", "warning", "critical"}
+_VALID_SEVERITIES = {None, "recovered", "warning", "critical"}
+_UNSET = object()
 
 
 @dataclass
@@ -35,6 +38,8 @@ def state_from_last_severity(last_severity: Optional[str]) -> TargetState:
     A new target (no events yet) or a target whose latest event is 'recovered'
     is in the 'normal' state.
     """
+    if last_severity not in _VALID_SEVERITIES:
+        raise ValueError(f"Invalid event severity: {last_severity!r}")
     if last_severity == "warning":
         return "warning"
     if last_severity == "critical":
@@ -55,13 +60,16 @@ def evaluate_state(
     strictly above warning_ms (and at or below critical_ms). Otherwise it is normal.
     """
     if (
-        isinstance(warning_ms, bool)
-        or isinstance(critical_ms, bool)
+        type(warning_ms) is not int
+        or type(critical_ms) is not int
         or warning_ms <= 0
-        or critical_ms <= 0
         or warning_ms >= critical_ms
+        or critical_ms > MAX_THRESHOLD_MS
     ):
-        raise ValueError("warning_ms must be positive and lower than critical_ms")
+        raise ValueError(
+            f"warning_ms and critical_ms must be whole numbers between 1 and {MAX_THRESHOLD_MS} "
+            "with warning_ms < critical_ms"
+        )
     if not is_up or latency_ms is None or not math.isfinite(latency_ms) or latency_ms < 0:
         return "critical"
     if latency_ms > critical_ms:
@@ -140,25 +148,33 @@ def evaluate_transition(
 
 
 def record_state_change(
-    db: Session, target: Target, result: CheckResult
+    db: Session,
+    target: Target,
+    result: CheckResult,
+    *,
+    last_severity: object = _UNSET,
 ) -> Optional[Event]:
     """Evaluate result against target's thresholds and add an Event to db if the state changed.
 
     Caller must hold the write transaction (and commit afterwards) so the CheckResult
     and any resulting Event are saved atomically.
     """
-    last_severity = db.scalar(
-        select(Event.severity)
-        .where(Event.target_id == target.id)
-        .order_by(Event.occurred_at.desc(), Event.id.desc())
-        .limit(1)
-    )
-    previous_state = state_from_last_severity(last_severity)
+    target_id = result.target_id if result.target_id is not None else target.id
+    if last_severity is _UNSET:
+        last_severity = db.scalar(
+            select(Event.severity)
+            .where(Event.target_id == target_id)
+            .order_by(Event.occurred_at.desc(), Event.id.desc())
+            .limit(1)
+        )
+    previous_state = state_from_last_severity(last_severity)  # type: ignore[arg-type]
     if result.latency_ms is not None:
         if not math.isfinite(result.latency_ms) or result.latency_ms < 0:
             result.latency_ms = None
         else:
             result.latency_ms = round(result.latency_ms, 2)
+    if result.latency_ms is None and result.is_up:
+        result.is_up = False
     _, decision = evaluate_transition(
         previous_state,
         is_up=result.is_up,
@@ -173,7 +189,7 @@ def record_state_change(
     if result.checked_at is None:
         result.checked_at = utc_now()
     event = Event(
-        target_id=target.id,
+        target_id=target_id,
         occurred_at=result.checked_at,
         severity=decision.severity,
         message=decision.message,

@@ -107,6 +107,7 @@ def test_results_limit_is_validated(client, make_target):
 
 
 def test_delete_removes_history_and_events_but_not_other_targets(client, make_target):
+    from sqlalchemy import select
     from app import database
     from app.models import CheckResult, Event
 
@@ -119,8 +120,8 @@ def test_delete_removes_history_and_events_but_not_other_targets(client, make_ta
 
     assert client.delete(f"/targets/{doomed['id']}").status_code == 204
     with database.SessionLocal() as db:
-        assert [r.target_id for r in db.query(CheckResult)] == [kept["id"]]
-        assert [e.target_id for e in db.query(Event)] == [kept["id"]]
+        assert list(db.scalars(select(CheckResult.target_id)).all()) == [kept["id"]]
+        assert list(db.scalars(select(Event.target_id)).all()) == [kept["id"]]
 
 
 @pytest.mark.parametrize(

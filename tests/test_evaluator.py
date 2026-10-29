@@ -242,11 +242,19 @@ def test_record_state_change_sets_matching_timestamp_when_checked_at_is_none(mak
         (-10, 1000),
         (True, 1000),
         (500, False),
+        (500.0, 1000),
+        (500, 3_600_001),
     ],
 )
 def test_evaluate_state_rejects_invalid_thresholds(warning_ms, critical_ms):
     with pytest.raises(ValueError, match="warning_ms"):
         evaluate_state(True, 100.0, warning_ms=warning_ms, critical_ms=critical_ms)
+
+
+@pytest.mark.parametrize("bad_severity", ["normal", "unknown", ""])
+def test_state_from_last_severity_rejects_invalid_severity(bad_severity):
+    with pytest.raises(ValueError, match="Invalid event severity"):
+        state_from_last_severity(bad_severity)
 
 
 @pytest.mark.parametrize("bad_previous", ["recovered", "unknown", ""])

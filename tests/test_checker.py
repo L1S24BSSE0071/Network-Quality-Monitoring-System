@@ -1,6 +1,7 @@
 """HTTP checker and result storage (no real network access)."""
 import httpx
 import pytest
+from sqlalchemy import func, select
 
 from app import checker, database
 from app.models import CheckResult, Target
@@ -125,7 +126,7 @@ def test_deleting_a_target_removes_its_results(client, make_target, monkeypatch)
     client.post(f"/targets/{target['id']}/check")
     client.delete(f"/targets/{target['id']}")
     with database.SessionLocal() as db:
-        assert db.query(CheckResult).count() == 0
+        assert db.scalar(select(func.count()).select_from(CheckResult)) == 0
 
 
 def test_target_deleted_during_a_check_leaves_no_orphan(client, make_target, monkeypatch):
@@ -141,7 +142,7 @@ def test_target_deleted_during_a_check_leaves_no_orphan(client, make_target, mon
         stored = checker.run_check_and_store(db, db.get(Target, target["id"]))
     assert stored is None
     with database.SessionLocal() as db:
-        assert db.query(CheckResult).count() == 0
+        assert db.scalar(select(func.count()).select_from(CheckResult)) == 0
 
     # and through the manual endpoint
     target2 = make_target(name="Second")
@@ -238,7 +239,7 @@ def test_stale_in_flight_check_is_discarded_when_target_url_or_enabled_changes(c
         assert checker.run_check_and_store(db, t3) is None
 
     with database.SessionLocal() as db:
-        assert db.query(CheckResult).count() == 0
+        assert db.scalar(select(func.count()).select_from(CheckResult)) == 0
 
 
 def test_describe_connect_error_walks_implicit_context():
