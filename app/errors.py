@@ -9,6 +9,8 @@ def _friendly_message(err: dict) -> str:
     kind = err.get("type", "")
     ctx = err.get("ctx") or {}
     if kind == "missing":
+        if tuple(err.get("loc", ())) == ("body",):
+            return "Request body is required"
         return "This field is required"
     if kind == "string_too_short":
         minimum = ctx.get("min_length", 1)

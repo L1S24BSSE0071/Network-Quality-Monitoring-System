@@ -38,17 +38,28 @@ class Base(DeclarativeBase):
     """Base class for all ORM models."""
 
 
+_LEGACY_INDEXES = (
+    "ix_check_results_target_id",
+    "ix_check_results_checked_at",
+    "ix_events_target_id",
+    "ix_events_occurred_at",
+)
+
+
 def init_db() -> None:
-    """Create missing tables and indexes.
+    """Create missing tables and indexes, and remove obsolete single-column indexes.
 
     create_all only creates missing tables, so indexes added in later versions are
-    created explicitly for databases that already exist.
+    created explicitly for databases that already exist, and the superseded Week 1
+    single-column indexes are dropped so writes do not maintain duplicate B-trees.
     """
     with engine.begin() as conn:
         Base.metadata.create_all(bind=conn)
         for table in Base.metadata.sorted_tables:
             for index in table.indexes:
                 index.create(bind=conn, checkfirst=True)
+        for name in _LEGACY_INDEXES:
+            conn.exec_driver_sql(f"DROP INDEX IF EXISTS {name}")
 
 
 def get_db():
