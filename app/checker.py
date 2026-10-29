@@ -176,9 +176,10 @@ def run_check_and_store(
     # connection checked out for the whole (possibly 10 s) network call, and a few dozen
     # slow targets would use up the pool and make every API request wait.
     db.rollback()
+    db.expunge_all()  # clear cached ORM objects when expire_on_commit=False
     outcome = perform_http_check(url)
     db.connection().exec_driver_sql("BEGIN IMMEDIATE")
-    current = db.get(Target, target_id)
+    current = db.get(Target, target_id, populate_existing=True)
     if (
         current is None
         or current.host_or_url != url

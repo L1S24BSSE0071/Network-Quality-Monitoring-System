@@ -7,6 +7,7 @@ from typing import Optional
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from sqlalchemy import select
 
 from app import database
 from app.checker import SUPPORTED_CHECK_TYPES, run_check_and_store
@@ -78,11 +79,13 @@ def sync_target(target_id: int) -> None:
         if not is_running():
             return
         with database.SessionLocal() as db:
-            target = db.get(Target, target_id)
-            if target is not None and target.enabled and target.check_type in SUPPORTED_CHECK_TYPES:
-                interval_seconds: Optional[int] = target.interval_seconds
-            else:
-                interval_seconds = None
+            interval_seconds = db.scalar(
+                select(Target.interval_seconds).where(
+                    Target.id == target_id,
+                    Target.enabled.is_(True),
+                    Target.check_type.in_(SUPPORTED_CHECK_TYPES),
+                )
+            )
         if interval_seconds is None:
             remove_target(target_id)
         else:

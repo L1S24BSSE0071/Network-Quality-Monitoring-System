@@ -223,6 +223,20 @@ def test_stale_in_flight_check_is_discarded_when_target_url_or_enabled_changes(c
     # Manual check endpoint returns 409 Conflict (not 404) when the target was modified mid-check.
     assert client.post(f"/targets/{target2['id']}/check").status_code == 409
 
+    # Also discarded when the target was committed earlier in the same session (expire_on_commit=False).
+    with database.SessionLocal() as db:
+        t3 = Target(name="Three", host_or_url="https://old.example.com", enabled=True)
+        db.add(t3)
+        db.commit()
+        monkeypatch.setattr(
+            checker, "perform_http_check",
+            lambda url, **kw: (
+                client.patch(f"/targets/{t3.id}", json={"host_or_url": "https://new.example.com"}),
+                checker.CheckOutcome(is_up=True, latency_ms=1.0, http_status=200),
+            )[1],
+        )
+        assert checker.run_check_and_store(db, t3) is None
+
     with database.SessionLocal() as db:
         assert db.query(CheckResult).count() == 0
 
