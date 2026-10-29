@@ -148,14 +148,22 @@ def test_valid_hosts_are_accepted(client, host_or_url):
         "http://[fe80::1%eth0]/",
         "http://\uff0fexample.com",
         "http://-bad.example.com",
+        "http://-m\u00fcnchen.de",
+        "http://m\u00fcnchen-.de",
+        "http://xn---mnchen-o2a.de",
+        "http://\u2665.com",
+        "http://xn--g6h.com",
         "http://exa mple.com",
         "http://example.com:0/",
         "http://example.com:/",
         "http://example.123",
         "http://example\u3002123",
+        "http://example.\u0967\u0968\u0969",
         "http://xn--abc.com",
         "http://test.99999/",
         "http://example.com/a b",
+        "http://example.com/a\u00a0b",
+        "http://example.com/a\x85b",
         "http://example.com/a\\b",
         "http://example.com/\x00",
     ],
@@ -164,7 +172,7 @@ def test_invalid_hosts_are_rejected(client, host_or_url):
     assert client.post("/targets", json={**VALID, "host_or_url": host_or_url}).status_code == 422
 
 
-@pytest.mark.parametrize("bad_name", ["a\x00b", "a\nb", "a\rb", "a\tb"])
+@pytest.mark.parametrize("bad_name", ["a\x00b", "a\nb", "a\rb", "a\tb", "a\x85b", "a\x9bb"])
 def test_control_characters_in_name_are_rejected(client, make_target, bad_name):
     assert client.post("/targets", json={**VALID, "name": bad_name}).status_code == 422
     target = make_target()

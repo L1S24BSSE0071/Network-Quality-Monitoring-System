@@ -1,6 +1,7 @@
 """Pydantic schemas: request validation and response shapes."""
 import ipaddress
 import re
+import unicodedata
 from datetime import datetime
 from typing import Literal, Optional
 from urllib.parse import urlparse
@@ -19,6 +20,16 @@ _HOSTNAME_RE = re.compile(
 )
 
 _NUMERIC_HOST_RE = re.compile(r"^[0-9.]+$")
+
+
+def _is_valid_unicode_label(label: str) -> bool:
+    """True if a decoded IDNA label has only letters, digits, combining marks or interior hyphens."""
+    if not label or label.startswith("-") or label.endswith("-"):
+        return False
+    return all(
+        ch == "-" or ch.isalnum() or unicodedata.category(ch).startswith("M")
+        for ch in label
+    )
 
 
 def _is_valid_host(host: str) -> bool:
@@ -41,7 +52,11 @@ def _is_valid_host(host: str) -> bool:
     try:
         host = host.encode("idna").decode("ascii")
         if "xn--" in host.lower():
-            host.lower().encode("ascii").decode("idna")
+            unicode_host = host.lower().encode("ascii").decode("idna")
+            if unicode_host.rsplit(".", 1)[-1].isnumeric():
+                return False
+            if not all(_is_valid_unicode_label(lbl) for lbl in unicode_host.split(".")):
+                return False
     except UnicodeError:
         return False
     if _NUMERIC_HOST_RE.match(host) or host.rsplit(".", 1)[-1].isdigit():
@@ -51,7 +66,7 @@ def _is_valid_host(host: str) -> bool:
 
 def validate_host_or_url(value: str, check_type: str) -> str:
     """Validate the host/URL for the given check type; return it unchanged if valid."""
-    if any(ord(ch) <= 32 or ord(ch) == 127 or ch == "\\" for ch in value):
+    if any(ord(ch) <= 32 or 127 <= ord(ch) <= 159 or ch.isspace() or ch == "\\" for ch in value):
         raise ValueError("Host or URL must not contain spaces, backslashes or control characters")
     if check_type == "http":
         try:
@@ -84,7 +99,7 @@ def validate_thresholds(warning_ms: int, critical_ms: int) -> None:
 
 
 def _check_no_control_chars(value: Optional[str]) -> Optional[str]:
-    if value is not None and any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+    if value is not None and any(ord(ch) < 32 or 127 <= ord(ch) <= 159 for ch in value):
         raise ValueError("Name must not contain control characters")
     return value
 
