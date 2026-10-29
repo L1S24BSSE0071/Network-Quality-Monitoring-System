@@ -11,6 +11,8 @@ from app.models import CheckResult, Event, Target, utc_now
 TargetState = Literal["normal", "warning", "critical"]
 EventSeverity = Literal["warning", "critical", "recovered"]
 
+_VALID_STATES = {"normal", "warning", "critical"}
+
 
 @dataclass
 class EventDecision:
@@ -52,6 +54,14 @@ def evaluate_state(
     or if latency_ms is strictly above critical_ms. It is warning if latency_ms is
     strictly above warning_ms (and at or below critical_ms). Otherwise it is normal.
     """
+    if (
+        isinstance(warning_ms, bool)
+        or isinstance(critical_ms, bool)
+        or warning_ms <= 0
+        or critical_ms <= 0
+        or warning_ms >= critical_ms
+    ):
+        raise ValueError("warning_ms must be positive and lower than critical_ms")
     if not is_up or latency_ms is None or not math.isfinite(latency_ms) or latency_ms < 0:
         return "critical"
     if latency_ms > critical_ms:
@@ -77,6 +87,9 @@ def evaluate_transition(
     - Entering 'critical' (from 'normal' or 'warning') -> severity 'critical'
     - Returning to 'normal' (from 'warning' or 'critical') -> severity 'recovered'
     """
+    if previous_state not in _VALID_STATES:
+        raise ValueError(f"Invalid previous_state: {previous_state!r}")
+
     has_valid_latency = (
         latency_ms is not None and math.isfinite(latency_ms) and latency_ms >= 0
     )
@@ -88,7 +101,8 @@ def evaluate_transition(
 
     if new_state == "critical":
         if not is_up or clean_latency is None:
-            detail = f"Target is down: {error_message}" if error_message else "Target is down"
+            clean_error = error_message.strip() if error_message else ""
+            detail = f"Target is down: {clean_error}" if clean_error else "Target is down"
         else:
             detail = (
                 f"Latency {_format_ms(clean_latency)} ms exceeded critical threshold ({critical_ms} ms)"
@@ -140,6 +154,11 @@ def record_state_change(
         .limit(1)
     )
     previous_state = state_from_last_severity(last_severity)
+    if result.latency_ms is not None:
+        if not math.isfinite(result.latency_ms) or result.latency_ms < 0:
+            result.latency_ms = None
+        else:
+            result.latency_ms = round(result.latency_ms, 2)
     _, decision = evaluate_transition(
         previous_state,
         is_up=result.is_up,
