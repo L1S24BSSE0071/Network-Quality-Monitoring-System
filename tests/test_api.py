@@ -198,3 +198,18 @@ def test_default_database_is_in_the_project_folder_not_the_current_folder():
     path = database._DEFAULT_DB_PATH
     assert path.is_absolute() and path.name == "monitoring.db"
     assert (path.parent / "app" / "main.py").exists()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"warning_ms": 500, "critical_ms": 10**25},
+        {"warning_ms": 10**25, "critical_ms": 2 * 10**25},
+        {"warning_ms": True, "critical_ms": 1000},
+        {"interval_seconds": True},
+    ],
+)
+def test_huge_thresholds_and_booleans_for_ints_are_rejected(client, make_target, overrides):
+    assert client.post("/targets", json={**VALID, **overrides}).status_code == 422
+    target = make_target()
+    assert client.patch(f"/targets/{target['id']}", json=overrides).status_code == 422

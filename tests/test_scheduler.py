@@ -80,6 +80,8 @@ def test_rename_does_not_trigger_a_new_check(client, make_target, running_schedu
     target = make_target(enabled=True, interval_seconds=3600)
     assert wait_for(lambda: result_count(client, target["id"]) == 1)
     client.patch(f"/targets/{target['id']}", json={"name": "Renamed", "warning_ms": 200})
+    client.patch(f"/targets/{target['id']}", json={"interval_seconds": 3600, "enabled": True})
+    client.patch(f"/targets/{target['id']}", json={})
     time.sleep(0.5)
     assert result_count(client, target["id"]) == 1
 

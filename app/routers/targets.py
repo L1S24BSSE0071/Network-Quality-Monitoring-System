@@ -7,7 +7,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app import scheduler
-from app.checker import run_check_and_store
+from app.checker import SUPPORTED_CHECK_TYPES, run_check_and_store
 from app.database import get_db
 from app.errors import format_errors
 from app.models import CheckResult, Event, Target
@@ -37,8 +37,9 @@ def create_target(payload: TargetCreate, db: Session = Depends(get_db)):
     target = Target(**payload.model_dump())
     db.add(target)
     db.commit()
-    db.refresh(target)
-    scheduler.sync_target(target.id, db)  # start checking it in the background
+    db.close()  # release the connection before acquiring the scheduler lock
+    if target.enabled and target.check_type in SUPPORTED_CHECK_TYPES:
+        scheduler.sync_target(target.id)  # start checking it in the background
     return target
 
 
@@ -71,12 +72,18 @@ def update_target(target_id: TargetId, payload: TargetUpdate, db: Session = Depe
             detail=format_errors(exc.errors()),
         )
 
-    for field, value in changes.items():
-        setattr(target, field, value)
+    changed_fields = {
+        field for field, value in changes.items() if getattr(target, field) != value
+    }
+    if not changed_fields:
+        return target
+
+    for field in changed_fields:
+        setattr(target, field, changes[field])
     db.commit()
-    db.refresh(target)
-    if _SCHEDULE_FIELDS & changes.keys():
-        scheduler.sync_target(target_id, db)  # apply a new interval, enable/disable, etc.
+    db.close()  # release the connection before acquiring the scheduler lock
+    if _SCHEDULE_FIELDS & changed_fields:
+        scheduler.sync_target(target_id)  # apply a new interval, enable/disable, etc.
     return target
 
 
@@ -90,6 +97,7 @@ def delete_target(target_id: TargetId, db: Session = Depends(get_db)):
     db.execute(delete(Event).where(Event.target_id == target_id))
     db.delete(target)
     db.commit()
+    db.close()
     scheduler.remove_target(target_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
