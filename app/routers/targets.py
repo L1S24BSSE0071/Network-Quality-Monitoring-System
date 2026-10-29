@@ -65,21 +65,16 @@ def update_target(target_id: TargetId, payload: TargetUpdate, db: Session = Depe
     """Edit a target. Only the fields sent are changed."""
     target = _get_target_or_404(target_id, db)
     changes = payload.model_dump(exclude_unset=True)
-    changed_fields = {
-        field for field, value in changes.items() if getattr(target, field) != value
-    }
-    if not changed_fields:
-        return target
 
     # Re-validate cross-field rules against the merged values, e.g. sending only
     # warning_ms must keep it below the stored critical_ms.
     try:
-        if "host_or_url" in changed_fields or "check_type" in changed_fields:
+        if "host_or_url" in changes or "check_type" in changes:
             validate_host_or_url(
                 changes.get("host_or_url", target.host_or_url),
                 changes.get("check_type", target.check_type),
             )
-        if "warning_ms" in changed_fields or "critical_ms" in changed_fields:
+        if "warning_ms" in changes or "critical_ms" in changes:
             validate_thresholds(
                 changes.get("warning_ms", target.warning_ms),
                 changes.get("critical_ms", target.critical_ms),
@@ -89,6 +84,12 @@ def update_target(target_id: TargetId, payload: TargetUpdate, db: Session = Depe
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=[{"field": "(request)", "message": str(exc)}],
         )
+
+    changed_fields = {
+        field for field, value in changes.items() if getattr(target, field) != value
+    }
+    if not changed_fields:
+        return target
 
     for field in changed_fields:
         setattr(target, field, changes[field])

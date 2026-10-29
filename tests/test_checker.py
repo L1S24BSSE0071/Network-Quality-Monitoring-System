@@ -224,3 +224,15 @@ def test_stale_in_flight_check_is_discarded_when_target_url_or_enabled_changes(c
 
     with database.SessionLocal() as db:
         assert db.query(CheckResult).count() == 0
+
+
+def test_describe_connect_error_walks_implicit_context():
+    import socket
+
+    try:
+        try:
+            raise socket.gaierror(11001, "getaddrinfo failed")
+        except socket.gaierror:
+            raise httpx.ConnectError("connect failed")
+    except httpx.ConnectError as exc:
+        assert checker._describe_connect_error(exc) == "DNS lookup failed (host name could not be resolved)"
