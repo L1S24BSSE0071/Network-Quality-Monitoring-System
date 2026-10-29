@@ -52,7 +52,10 @@ def validate_host_or_url(value: str, check_type: str) -> str:
     if any(ord(ch) <= 32 or ord(ch) == 127 or ch == "\\" for ch in value):
         raise ValueError("Host or URL must not contain spaces, backslashes or control characters")
     if check_type == "http":
-        parsed = urlparse(value)
+        try:
+            parsed = urlparse(value)
+        except ValueError:
+            raise ValueError("URL does not contain a valid host name")
         if parsed.scheme not in ("http", "https"):
             raise ValueError("URL must start with http:// or https://")
         try:
@@ -64,7 +67,7 @@ def validate_host_or_url(value: str, check_type: str) -> str:
             raise ValueError("URL has an invalid port")
         if not hostname or not _is_valid_host(hostname):
             raise ValueError("URL does not contain a valid host name")
-        if parsed.username or parsed.password:
+        if "@" in parsed.netloc:
             raise ValueError("URL must not contain a user name or password")
     else:  # ping
         if not _is_valid_host(value):
