@@ -600,6 +600,16 @@ def test_events_and_summary_queries_use_indexes_without_temp_btree():
                 {"severity": "critical", "limit": 50},
                 "ix_events_severity_occurred",
             ),
+            (
+                targets_router._LIST_TARGET_EVENTS_QUERY,
+                {"target_id": 1, "limit": 50},
+                "ix_events_target_occurred",
+            ),
+            (
+                targets_router._LIST_TARGET_EVENTS_BY_SEVERITY_QUERY,
+                {"target_id": 1, "severity": "critical", "limit": 50},
+                "ix_events_target_sev_occurred",
+            ),
         ):
             compiled = query.compile(dialect=database.engine.dialect)
             bound = tuple(compiled.construct_params(params).values())
