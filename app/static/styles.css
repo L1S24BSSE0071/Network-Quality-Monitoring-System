@@ -337,6 +337,25 @@ body {
   word-break: break-all;
 }
 
+.target-link {
+  color: var(--navy);
+  text-decoration: none;
+  font-family: inherit;
+  word-break: break-all;
+  transition: color 0.15s ease;
+}
+
+.target-link:hover {
+  text-decoration: underline;
+  color: #0f172a;
+}
+
+.target-link:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 /* Status & metadata badges */
 .badge {
   display: inline-flex;
