@@ -36,7 +36,7 @@ flowchart LR
 
 | Component | Module | Responsibility | Status |
 |-----------|--------|----------------|--------|
-| API | `app/main.py`, `app/routers/targets.py` | Target CRUD, manual check, results listing, readable validation errors | Built (Week 1) |
+| API | `app/main.py`, `app/routers/targets.py` | Target CRUD, manual check, history, event log, uptime summaries, readable validation errors | Built (Weeks 1-2) |
 | Data layer | `app/database.py`, `app/models.py` | SQLite connection and ORM tables | Built (Week 1) |
 | Validation | `app/schemas.py`, `app/errors.py` | Input rules and response shapes | Built (Week 1) |
 | Checker | `app/checker.py` | HTTP check with timeout and error handling; stores a result | Built (Week 1) |
