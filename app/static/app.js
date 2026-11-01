@@ -233,4 +233,14 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
   });
+
+  window.addEventListener("online", () => {
+    loadDashboard().then(() => {
+      schedulePoll();
+    });
+  });
+
+  window.addEventListener("offline", () => {
+    setConnectionState(false, "Browser is offline (no network connection).");
+  });
 });

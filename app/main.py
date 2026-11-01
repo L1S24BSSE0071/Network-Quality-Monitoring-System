@@ -60,13 +60,17 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 def dashboard():
     """Serve the monitoring dashboard web page."""
-    return FileResponse(_INDEX_HTML)
+    return FileResponse(_INDEX_HTML, headers={"Cache-Control": "no-cache"})
 
 
 @app.api_route("/favicon.ico", methods=["GET", "HEAD"], include_in_schema=False)
 def favicon():
     """Serve the tab icon for direct browser requests."""
-    return Response(content=_FAVICON_SVG, media_type="image/svg+xml")
+    return Response(
+        content=_FAVICON_SVG,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.get("/health", tags=["system"])

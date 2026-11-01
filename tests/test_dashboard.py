@@ -5,6 +5,7 @@ def test_dashboard_root_serves_html_layout(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
+    assert "no-cache" in response.headers.get("cache-control", "")
 
     html = response.text
     assert "Network Quality Monitoring System" in html
@@ -21,6 +22,7 @@ def test_dashboard_root_serves_html_layout(client):
     head_resp = client.head("/")
     assert head_resp.status_code == 200
     assert "text/html" in head_resp.headers["content-type"]
+    assert "no-cache" in head_resp.headers.get("cache-control", "")
 
 
 def test_favicon_route_serves_svg(client):
@@ -29,10 +31,12 @@ def test_favicon_route_serves_svg(client):
     assert "image/svg+xml" in response.headers["content-type"]
     assert "<svg" in response.text
     assert "#1f3a5f" in response.text
+    assert "max-age=86400" in response.headers.get("cache-control", "")
 
     head_resp = client.head("/favicon.ico")
     assert head_resp.status_code == 200
     assert "image/svg+xml" in head_resp.headers["content-type"]
+    assert "max-age=86400" in head_resp.headers.get("cache-control", "")
 
 
 def test_dashboard_static_assets_are_served(client):
@@ -54,6 +58,8 @@ def test_dashboard_static_assets_are_served(client):
     assert "AbortController" in js_resp.text
     assert "target-link" in js_resp.text
     assert "schedulePoll" in js_resp.text
+    assert "addEventListener(\"online\"" in js_resp.text
+    assert "addEventListener(\"offline\"" in js_resp.text
 
 
 def test_static_missing_file_returns_404(client):
