@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Network Quality Monitoring System</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <div class="brand">
+        <span class="brand-dot" aria-hidden="true"></span>
+        <div>
+          <h1 class="brand-title">Network Quality Monitoring System</h1>
+          <p class="brand-subtitle">Live availability &amp; latency overview</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span id="api-status" class="connection-pill connection-connecting" role="status" aria-live="polite">
+          Connecting...
+        </span>
+        <span id="last-updated" class="last-updated">Never updated</span>
+        <button id="refresh-btn" type="button" class="btn btn-secondary">
+          Refresh
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container main-content">
+    <div id="api-error" class="alert-banner alert-critical" role="alert" hidden></div>
+
+    <section id="overview-cards" class="kpi-grid" aria-label="System status overview">
+      <article class="kpi-card">
+        <span class="kpi-label">Total Targets</span>
+        <strong id="count-total" class="kpi-value">0</strong>
+      </article>
+      <article class="kpi-card kpi-normal">
+        <span class="kpi-label">Normal</span>
+        <strong id="count-normal" class="kpi-value">0</strong>
+      </article>
+      <article class="kpi-card kpi-warning">
+        <span class="kpi-label">Warning</span>
+        <strong id="count-warning" class="kpi-value">0</strong>
+      </article>
+      <article class="kpi-card kpi-critical">
+        <span class="kpi-label">Critical</span>
+        <strong id="count-critical" class="kpi-value">0</strong>
+      </article>
+      <article class="kpi-card kpi-unknown">
+        <span class="kpi-label">Unknown</span>
+        <strong id="count-unknown" class="kpi-value">0</strong>
+      </article>
+    </section>
+
+    <section id="targets-section" class="panel" aria-labelledby="targets-heading">
+      <div class="panel-header">
+        <div>
+          <h2 id="targets-heading" class="panel-title">Monitored Targets</h2>
+          <p class="panel-subtitle">Targets loaded from the monitoring API and their latest status.</p>
+        </div>
+        <span id="targets-count-label" class="badge badge-neutral">0 targets</span>
+      </div>
+
+      <div id="targets-loading" class="state-box" role="status" aria-live="polite">
+        <p class="state-title">Loading targets...</p>
+        <p class="state-text">Fetching target list and latest status from the API.</p>
+      </div>
+
+      <div id="targets-empty" class="state-box" hidden>
+        <p class="state-title">No monitoring targets configured yet</p>
+        <p class="state-text">
+          Add a website or server to begin monitoring availability, latency thresholds, and state-change events.
+        </p>
+      </div>
+
+      <div id="targets-table-wrap" class="table-wrap" hidden>
+        <table id="targets-table" class="targets-table">
+          <thead>
+            <tr>
+              <th scope="col">Status</th>
+              <th scope="col">Target</th>
+              <th scope="col">Host / URL</th>
+              <th scope="col">Type</th>
+              <th scope="col">Interval</th>
+              <th scope="col">Thresholds</th>
+              <th scope="col">Schedule</th>
+            </tr>
+          </thead>
+          <tbody id="targets-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <span>Network Quality Monitoring System</span>
+      <nav aria-label="System links" class="footer-links">
+        <a href="/docs" target="_blank" rel="noopener">API Documentation (/docs)</a>
+        <a href="/health" target="_blank" rel="noopener">Health Check (/health)</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

@@ -1,16 +1,21 @@
 """Application entry point."""
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app import models  # noqa: F401  (registers the tables with Base)
 from app import scheduler
 from app.database import init_db
 from app.errors import format_errors
 from app.routers import targets
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+_INDEX_HTML = _STATIC_DIR / "index.html"
 
 # Show the scheduler's messages (uvicorn only configures its own loggers), but keep
 # the libraries quiet: httpx and APScheduler would otherwise log every single check.
@@ -37,12 +42,19 @@ app = FastAPI(
 
 app.include_router(targets.router)
 app.include_router(targets.events_router)
+app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError):
     """Return validation problems as a simple list of field + message."""
     return JSONResponse(status_code=422, content={"detail": format_errors(exc.errors())})
+
+
+@app.get("/", include_in_schema=False)
+def dashboard():
+    """Serve the monitoring dashboard web page."""
+    return FileResponse(_INDEX_HTML)
 
 
 @app.get("/health", tags=["system"])
