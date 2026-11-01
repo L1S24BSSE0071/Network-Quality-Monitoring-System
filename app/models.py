@@ -86,6 +86,7 @@ class Event(Base):
     __tablename__ = "events"
     __table_args__ = (
         Index("ix_events_target_occurred", "target_id", "occurred_at"),
+        Index("ix_events_target_sev_occurred", "target_id", "severity", "occurred_at"),
         Index("ix_events_occurred_at", "occurred_at"),
         Index("ix_events_severity_occurred", "severity", "occurred_at"),
     )
