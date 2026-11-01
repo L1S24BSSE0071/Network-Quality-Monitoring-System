@@ -150,6 +150,11 @@ body {
   cursor: not-allowed;
 }
 
+.btn:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
 .btn-secondary {
   background-color: rgba(255, 255, 255, 0.12);
   color: #ffffff;

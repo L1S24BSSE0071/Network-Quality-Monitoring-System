@@ -132,12 +132,19 @@ async function loadDashboard() {
   }
   refreshInFlight = true;
   const refreshBtn = document.getElementById("refresh-btn");
-  refreshBtn.disabled = true;
+  if (refreshBtn) {
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = "Refreshing...";
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
 
   try {
     const response = await fetch("/targets/summaries", {
       headers: { Accept: "application/json" },
       cache: "no-store",
+      signal: controller.signal,
     });
     if (!response.ok) {
       throw new Error(`API returned HTTP ${response.status}`);
@@ -149,17 +156,27 @@ async function loadDashboard() {
     updateOverviewCounts(summaries);
     renderTargets(summaries);
     setConnectionState(true);
-    document.getElementById("last-updated").textContent =
-      `Updated ${new Date().toLocaleTimeString()}`;
+    const updatedEl = document.getElementById("last-updated");
+    if (updatedEl) {
+      updatedEl.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    }
   } catch (err) {
-    document.getElementById("targets-loading").hidden = true;
-    setConnectionState(
-      false,
-      `Failed to load targets from the monitoring API (${err.message || "network error"}).`
-    );
+    const loadingBox = document.getElementById("targets-loading");
+    if (loadingBox) {
+      loadingBox.hidden = true;
+    }
+    const message =
+      err.name === "AbortError"
+        ? "Request timed out after 10 seconds"
+        : err.message || "network error";
+    setConnectionState(false, `Failed to load targets from the monitoring API (${message}).`);
   } finally {
+    clearTimeout(timeoutId);
     refreshInFlight = false;
-    refreshBtn.disabled = false;
+    if (refreshBtn) {
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = "Refresh";
+    }
   }
 }
 
