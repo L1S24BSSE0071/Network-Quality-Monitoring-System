@@ -556,3 +556,70 @@ def test_summaries_and_time_window_filtering(client, make_target):
     assert client.get(f"/targets/{checked['id']}/summary?hours=0").status_code == 422
     assert client.get(f"/targets/{checked['id']}/summary?hours=721").status_code == 422
     assert client.get(f"/targets/{checked['id']}/results?hours=0").status_code == 422
+
+
+def test_summary_hours_window_when_all_checks_are_older_than_window(client, make_target):
+    target = make_target(name="OldChecksOnly", warning_ms=100, critical_ms=300)
+    with database.SessionLocal() as db:
+        db.add(
+            CheckResult(
+                target_id=target["id"],
+                checked_at=utc_now() - timedelta(hours=5),
+                is_up=True,
+                latency_ms=42.5,
+                http_status=200,
+            )
+        )
+        db.commit()
+
+    s_one = client.get(f"/targets/{target['id']}/summary?hours=1").json()
+    assert s_one["status"] == "normal"
+    assert s_one["last_latency_ms"] == 42.5
+    assert s_one["total_checks"] == 0
+    assert s_one["up_checks"] == 0
+    assert s_one["failed_checks"] == 0
+    assert s_one["uptime_pct"] is None
+    assert s_one["avg_latency_ms"] is None
+
+    s_list = client.get("/targets/summaries?hours=1").json()
+    assert len(s_list) == 1
+    assert s_list[0]["total_checks"] == 0
+    assert s_list[0]["uptime_pct"] is None
+    assert s_list[0]["avg_latency_ms"] is None
+
+
+def test_events_and_summary_queries_use_indexes_without_temp_btree():
+    from app.routers import targets as targets_router
+
+    with database.SessionLocal() as db:
+        conn = db.connection()
+        for query, params in (
+            (targets_router._LIST_ALL_EVENTS_QUERY, {"limit": 50}),
+            (
+                targets_router._LIST_ALL_EVENTS_BY_SEVERITY_QUERY,
+                {"severity": "critical", "limit": 50},
+            ),
+        ):
+            compiled = query.compile(dialect=database.engine.dialect)
+            bound = tuple(compiled.construct_params(params).values())
+            plan = " ".join(
+                row[-1]
+                for row in conn.exec_driver_sql(f"EXPLAIN QUERY PLAN {compiled}", bound).fetchall()
+            )
+            assert "ix_events_occurred_at" in plan
+            assert "TEMP B-TREE" not in plan
+
+        compiled_agg = targets_router._AGG_ALL_SINCE_QUERY.compile(
+            dialect=database.engine.dialect
+        )
+        bound_agg = tuple(
+            compiled_agg.construct_params({"since": utc_now().isoformat()}).values()
+        )
+        plan_agg = " ".join(
+            row[-1]
+            for row in conn.exec_driver_sql(
+                f"EXPLAIN QUERY PLAN {compiled_agg}", bound_agg
+            ).fetchall()
+        )
+        assert "SEARCH check_results USING INDEX ix_check_results_target_checked" in plan_agg
+        assert "TEMP B-TREE" not in plan_agg

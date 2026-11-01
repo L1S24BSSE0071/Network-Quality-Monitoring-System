@@ -201,36 +201,39 @@ def run_check_and_store(
     db.rollback()
     outcome = perform_http_check(url)
     db.connection().exec_driver_sql("BEGIN IMMEDIATE")
-    row = db.execute(_POST_CHECK_TARGET_QUERY, {"target_id": target_id}).one_or_none()
-    if (
-        row is None
-        or row[0] != url
-        or row[1] != check_type
-        or (require_enabled and not row[2])
-    ):
-        db.rollback()
-        return None
-    result = CheckResult(
-        target_id=target_id,
-        checked_at=utc_now(),
-        is_up=outcome.is_up,
-        latency_ms=outcome.latency_ms,
-        http_status=outcome.http_status,
-        error_message=outcome.error_message,
-    )
-    record_state_change(
-        db,
-        target,
-        result,
-        last_severity=row[5],
-        warning_ms=row[3],
-        critical_ms=row[4],
-    )
-    db.add(result)
     try:
+        row = db.execute(_POST_CHECK_TARGET_QUERY, {"target_id": target_id}).one_or_none()
+        if (
+            row is None
+            or row[0] != url
+            or row[1] != check_type
+            or (require_enabled and not row[2])
+        ):
+            db.rollback()
+            return None
+        result = CheckResult(
+            target_id=target_id,
+            checked_at=utc_now(),
+            is_up=outcome.is_up,
+            latency_ms=outcome.latency_ms,
+            http_status=outcome.http_status,
+            error_message=outcome.error_message,
+        )
+        record_state_change(
+            db,
+            target,
+            result,
+            last_severity=row[5],
+            warning_ms=row[3],
+            critical_ms=row[4],
+        )
+        db.add(result)
         db.commit()
     except IntegrityError:
         # The foreign key failed: the target no longer exists.
         db.rollback()
         return None
+    except Exception:
+        db.rollback()
+        raise
     return result

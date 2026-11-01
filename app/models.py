@@ -84,7 +84,10 @@ class Event(Base):
     """A state change for a target (warning, critical or recovered)."""
 
     __tablename__ = "events"
-    __table_args__ = (Index("ix_events_target_occurred", "target_id", "occurred_at"),)
+    __table_args__ = (
+        Index("ix_events_target_occurred", "target_id", "occurred_at"),
+        Index("ix_events_occurred_at", "occurred_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     target_id: Mapped[int] = mapped_column(ForeignKey("targets.id", ondelete="CASCADE"))

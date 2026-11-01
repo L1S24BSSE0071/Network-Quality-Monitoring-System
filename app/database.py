@@ -49,7 +49,6 @@ _LEGACY_INDEXES = (
     "ix_check_results_target_id",
     "ix_check_results_checked_at",
     "ix_events_target_id",
-    "ix_events_occurred_at",
 )
 
 

@@ -192,6 +192,8 @@ def record_state_change(
     and any resulting Event are saved atomically.
     """
     target_id = result.target_id if result.target_id is not None else target.id
+    if result.target_id is None and target_id is not None:
+        result.target_id = target_id
     if last_severity is _UNSET:
         last_severity = db.scalar(_LAST_EVENT_SEVERITY_QUERY, {"target_id": target_id})
     previous_state = state_from_last_severity(last_severity)  # type: ignore[arg-type]
