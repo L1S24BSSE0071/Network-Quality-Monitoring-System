@@ -593,11 +593,12 @@ def test_events_and_summary_queries_use_indexes_without_temp_btree():
 
     with database.SessionLocal() as db:
         conn = db.connection()
-        for query, params in (
-            (targets_router._LIST_ALL_EVENTS_QUERY, {"limit": 50}),
+        for query, params, expected_idx in (
+            (targets_router._LIST_ALL_EVENTS_QUERY, {"limit": 50}, "ix_events_occurred_at"),
             (
                 targets_router._LIST_ALL_EVENTS_BY_SEVERITY_QUERY,
                 {"severity": "critical", "limit": 50},
+                "ix_events_severity_occurred",
             ),
         ):
             compiled = query.compile(dialect=database.engine.dialect)
@@ -606,7 +607,7 @@ def test_events_and_summary_queries_use_indexes_without_temp_btree():
                 row[-1]
                 for row in conn.exec_driver_sql(f"EXPLAIN QUERY PLAN {compiled}", bound).fetchall()
             )
-            assert "ix_events_occurred_at" in plan
+            assert expected_idx in plan
             assert "TEMP B-TREE" not in plan
 
         compiled_agg = targets_router._AGG_ALL_SINCE_QUERY.compile(

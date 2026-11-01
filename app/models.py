@@ -87,6 +87,7 @@ class Event(Base):
     __table_args__ = (
         Index("ix_events_target_occurred", "target_id", "occurred_at"),
         Index("ix_events_occurred_at", "occurred_at"),
+        Index("ix_events_severity_occurred", "severity", "occurred_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
