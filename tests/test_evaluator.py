@@ -1,5 +1,5 @@
 """Unit and integration tests for threshold evaluation and state-change events."""
-from datetime import timezone
+from datetime import timedelta, timezone
 
 import pytest
 from sqlalchemy import select
@@ -7,12 +7,13 @@ from sqlalchemy import select
 from app import checker, database
 from app.checker import CheckOutcome
 from app.evaluator import (
+    calculate_uptime_pct,
     evaluate_state,
     evaluate_transition,
     record_state_change,
     state_from_last_severity,
 )
-from app.models import CheckResult, Event, Target
+from app.models import CheckResult, Event, Target, utc_now
 
 
 # ---------------------------------------------------------------------------
@@ -387,3 +388,171 @@ def test_offline_then_online_milestone_scenario(client, make_target, monkeypatch
     assert events[0].latency_ms is None
     assert "Connection refused" in events[0].message
     assert events[1].latency_ms == 42.0
+
+
+# ---------------------------------------------------------------------------
+# Uptime percentage, history window, events and summary endpoints
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("total", "up", "expected"),
+    [
+        (0, 0, None),
+        (5, 0, 0.0),
+        (5, 5, 100.0),
+        (3, 2, 66.67),
+        (3, 1, 33.33),
+        (4, 3, 75.0),
+    ],
+)
+def test_calculate_uptime_pct(total, up, expected):
+    assert calculate_uptime_pct(total, up) == expected
+
+
+@pytest.mark.parametrize(
+    ("total", "up"),
+    [
+        (-1, 0),
+        (5, -1),
+        (2, 3),
+        (True, 1),
+        (1, False),
+        (1.0, 1),
+    ],
+)
+def test_calculate_uptime_pct_rejects_invalid_counts(total, up):
+    with pytest.raises(ValueError):
+        calculate_uptime_pct(total, up)  # type: ignore[arg-type]
+
+
+def test_events_endpoints_list_and_filter_by_severity_and_target(client, make_target, monkeypatch):
+    t1 = make_target(name="One", warning_ms=100, critical_ms=300)
+    t2 = make_target(name="Two", warning_ms=100, critical_ms=300)
+
+    outcomes_t1 = iter(
+        [
+            CheckOutcome(is_up=True, latency_ms=200.0, http_status=200),  # warning
+            CheckOutcome(is_up=False, error_message="Down"),              # critical
+            CheckOutcome(is_up=True, latency_ms=40.0, http_status=200),   # recovered
+        ]
+    )
+    monkeypatch.setattr(checker, "perform_http_check", lambda url: next(outcomes_t1))
+    for _ in range(3):
+        assert client.post(f"/targets/{t1['id']}/check").status_code == 201
+
+    monkeypatch.setattr(
+        checker, "perform_http_check",
+        lambda url: CheckOutcome(is_up=False, error_message="Timeout"),
+    )
+    assert client.post(f"/targets/{t2['id']}/check").status_code == 201
+
+    # Per-target events (newest first)
+    r1 = client.get(f"/targets/{t1['id']}/events")
+    assert r1.status_code == 200
+    assert [e["severity"] for e in r1.json()] == ["recovered", "critical", "warning"]
+
+    # Per-target filter by severity and limit
+    only_crit = client.get(f"/targets/{t1['id']}/events?severity=critical").json()
+    assert [e["severity"] for e in only_crit] == ["critical"]
+    limited = client.get(f"/targets/{t1['id']}/events?limit=2").json()
+    assert len(limited) == 2
+
+    # Global /events endpoint
+    all_events = client.get("/events").json()
+    assert len(all_events) == 4
+    crit_all = client.get("/events?severity=critical").json()
+    assert len(crit_all) == 2
+    by_target = client.get(f"/events?target_id={t2['id']}").json()
+    assert len(by_target) == 1 and by_target[0]["target_id"] == t2["id"]
+    by_target_sev = client.get(f"/events?target_id={t1['id']}&severity=recovered").json()
+    assert len(by_target_sev) == 1 and by_target_sev[0]["severity"] == "recovered"
+
+    # Unknown target on /targets/{id}/events is 404; invalid severity is 422
+    assert client.get("/targets/99999/events").status_code == 404
+    assert client.get(f"/targets/{t1['id']}/events?severity=bad").status_code == 422
+    assert client.get("/events?severity=bad").status_code == 422
+
+
+def test_summaries_and_time_window_filtering(client, make_target):
+    assert client.get("/targets/summaries").json() == []
+
+    unchecked = make_target(name="Unchecked", warning_ms=100, critical_ms=300)
+    checked = make_target(name="Checked", warning_ms=100, critical_ms=300)
+
+    # Unchecked target has status='unknown' and None uptime/latency
+    s_unchecked = client.get(f"/targets/{unchecked['id']}/summary").json()
+    assert s_unchecked["status"] == "unknown"
+    assert s_unchecked["total_checks"] == 0
+    assert s_unchecked["uptime_pct"] is None
+    assert s_unchecked["avg_latency_ms"] is None
+
+    now = utc_now()
+    with database.SessionLocal() as db:
+        db.add_all(
+            [
+                # Old failure 5 hours ago
+                CheckResult(
+                    target_id=checked["id"],
+                    checked_at=now - timedelta(hours=5),
+                    is_up=False,
+                    latency_ms=None,
+                    error_message="Old outage",
+                ),
+                # Recent healthy check 30 minutes ago (50 ms)
+                CheckResult(
+                    target_id=checked["id"],
+                    checked_at=now - timedelta(minutes=30),
+                    is_up=True,
+                    latency_ms=50.0,
+                    http_status=200,
+                ),
+                # Latest check 5 minutes ago (150 ms -> warning)
+                CheckResult(
+                    target_id=checked["id"],
+                    checked_at=now - timedelta(minutes=5),
+                    is_up=True,
+                    latency_ms=150.0,
+                    http_status=200,
+                ),
+            ]
+        )
+        db.commit()
+
+    # All-time summary for `checked`: 2 up out of 3 (66.67%), avg latency (50+150)/2 = 100.0, latest status='warning'
+    s_all = client.get(f"/targets/{checked['id']}/summary").json()
+    assert s_all["status"] == "warning"
+    assert s_all["last_latency_ms"] == 150.0
+    assert s_all["total_checks"] == 3
+    assert s_all["up_checks"] == 2
+    assert s_all["failed_checks"] == 1
+    assert s_all["uptime_pct"] == 66.67
+    assert s_all["avg_latency_ms"] == 100.0
+
+    # Last 1 hour summary: 2 up out of 2 (100.0%)
+    s_1h = client.get(f"/targets/{checked['id']}/summary?hours=1").json()
+    assert s_1h["status"] == "warning"
+    assert s_1h["total_checks"] == 2
+    assert s_1h["up_checks"] == 2
+    assert s_1h["failed_checks"] == 0
+    assert s_1h["uptime_pct"] == 100.0
+
+    # List summaries returns both targets in order
+    all_summaries = client.get("/targets/summaries").json()
+    assert [s["target_id"] for s in all_summaries] == [unchecked["id"], checked["id"]]
+    assert [s["status"] for s in all_summaries] == ["unknown", "warning"]
+
+    all_summaries_1h = client.get("/targets/summaries?hours=1").json()
+    assert all_summaries_1h[1]["uptime_pct"] == 100.0
+
+    # Results time-window filter (?hours=1)
+    r_all = client.get(f"/targets/{checked['id']}/results").json()
+    r_1h = client.get(f"/targets/{checked['id']}/results?hours=1").json()
+    assert len(r_all) == 3
+    assert len(r_1h) == 2
+
+    # 404 and 422 checks
+    assert client.get("/targets/99999/summary").status_code == 404
+    assert client.get(f"/targets/{checked['id']}/summary?hours=0").status_code == 422
+    assert client.get(f"/targets/{checked['id']}/summary?hours=721").status_code == 422
+    assert client.get(f"/targets/{checked['id']}/results?hours=0").status_code == 422

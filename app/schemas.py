@@ -13,6 +13,8 @@ MAX_INTERVAL_SECONDS = 3600
 MAX_THRESHOLD_MS = 3_600_000
 
 CheckType = Literal["http", "ping"]
+TargetStatus = Literal["normal", "warning", "critical", "unknown"]
+EventSeverity = Literal["warning", "critical", "recovered"]
 
 # One DNS label: letters/digits/hyphens, not starting or ending with a hyphen.
 _HOSTNAME_RE = re.compile(
@@ -262,6 +264,30 @@ class EventRead(BaseModel):
     id: int
     target_id: int
     occurred_at: datetime
-    severity: Literal["warning", "critical", "recovered"]
+    severity: EventSeverity
     message: str
     latency_ms: Optional[float]
+
+
+class TargetSummary(BaseModel):
+    """Current status, latest check details and uptime statistics for a target."""
+
+    target_id: int
+    name: str
+    host_or_url: str
+    check_type: CheckType
+    interval_seconds: int
+    warning_ms: int
+    critical_ms: int
+    enabled: bool
+    status: TargetStatus
+    last_checked_at: Optional[datetime] = None
+    last_is_up: Optional[bool] = None
+    last_latency_ms: Optional[float] = None
+    last_http_status: Optional[int] = None
+    last_error_message: Optional[str] = None
+    total_checks: int = 0
+    up_checks: int = 0
+    failed_checks: int = 0
+    uptime_pct: Optional[float] = None
+    avg_latency_ms: Optional[float] = None
