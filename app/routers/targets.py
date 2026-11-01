@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app import scheduler
 from app.checker import SUPPORTED_CHECK_TYPES, run_check_and_store
 from app.database import get_db
-from app.evaluator import calculate_uptime_pct, evaluate_state
+from app.evaluator import _normalize_latency, calculate_uptime_pct, evaluate_state
 from app.models import CheckResult, Event, Target, utc_now
 from app.schemas import (
     CheckResultRead,
@@ -135,7 +135,10 @@ _AGG_ALL_QUERY = select(
     func.coalesce(func.sum(_UP_CASE), 0),
     func.avg(CheckResult.latency_ms),
 ).group_by(CheckResult.target_id)
-_AGG_ALL_SINCE_QUERY = _AGG_ALL_QUERY.where(CheckResult.checked_at >= bindparam("since"))
+_AGG_ALL_SINCE_QUERY = _AGG_ALL_QUERY.where(
+    CheckResult.target_id.in_(select(Target.id)),
+    CheckResult.checked_at >= bindparam("since"),
+)
 
 _AGG_ONE_QUERY = select(
     func.count(CheckResult.id),
@@ -185,15 +188,16 @@ def _build_summary(
         last_error_message,
     ) = row
 
+    clean_last_latency = _normalize_latency(last_latency_ms)
     if last_checked_at is None or last_is_up is None:
         target_status: TargetStatus = "unknown"
     else:
         target_status = evaluate_state(
-            bool(last_is_up), last_latency_ms, warning_ms, critical_ms
+            bool(last_is_up), clean_last_latency, warning_ms, critical_ms
         )
 
-    total = int(total_checks or 0)
-    up = int(up_checks or 0)
+    total = max(int(total_checks or 0), 0)
+    up = min(max(int(up_checks or 0), 0), total)
     return TargetSummary(
         target_id=target_id,
         name=name,
@@ -206,14 +210,14 @@ def _build_summary(
         status=target_status,
         last_checked_at=last_checked_at,
         last_is_up=last_is_up,
-        last_latency_ms=last_latency_ms,
+        last_latency_ms=clean_last_latency,
         last_http_status=last_http_status,
         last_error_message=last_error_message,
         total_checks=total,
         up_checks=up,
         failed_checks=total - up,
         uptime_pct=calculate_uptime_pct(total, up),
-        avg_latency_ms=round(float(avg_latency_raw), 2) if avg_latency_raw is not None else None,
+        avg_latency_ms=_normalize_latency(avg_latency_raw),
     )
 
 
@@ -251,6 +255,8 @@ def list_target_summaries(
         agg_rows = db.execute(_AGG_ALL_QUERY).all()
     else:
         since = utc_now() - timedelta(hours=hours)
+        if all(row[8] is None or row[8] < since for row in rows):
+            return [_build_summary(row, 0, 0, None) for row in rows]
         agg_rows = db.execute(_AGG_ALL_SINCE_QUERY, {"since": since}).all()
     agg_by_target = {r[0]: (r[1], r[2], r[3]) for r in agg_rows}
 
@@ -285,6 +291,8 @@ def get_target_summary(
         agg = db.execute(_AGG_ONE_QUERY, {"target_id": target_id}).one()
     else:
         since = utc_now() - timedelta(hours=hours)
+        if row[8] < since:
+            return _build_summary(row, 0, 0, None)
         agg = db.execute(
             _AGG_ONE_SINCE_QUERY, {"target_id": target_id, "since": since}
         ).one()

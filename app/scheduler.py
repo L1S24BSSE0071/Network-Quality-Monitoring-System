@@ -46,13 +46,13 @@ def run_scheduled_check(target_id: int) -> None:
     next run, and never raises, so one failing target cannot affect others.
     """
     try:
-        for _ in range(3):
-            with database.SessionLocal() as db:
+        with database.SessionLocal() as db:
+            for _ in range(3):
                 row = db.execute(_SCHEDULED_TARGET_QUERY, {"target_id": target_id}).one_or_none()
                 if row is None:
                     # Deleted, disabled, or switched to an unsupported check type since the
                     # job was scheduled: release the DB connection before taking the lock.
-                    db.rollback()
+                    db.close()
                     remove_target(target_id)
                     return
                 stub = Target(id=target_id, host_or_url=row[0], check_type=row[1])
