@@ -3,7 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +16,12 @@ from app.routers import targets
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _INDEX_HTML = _STATIC_DIR / "index.html"
+_FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+    '<circle cx="50" cy="50" r="46" fill="#1f3a5f"/>'
+    '<circle cx="50" cy="50" r="20" fill="#34d399"/>'
+    "</svg>"
+)
 
 # Show the scheduler's messages (uvicorn only configures its own loggers), but keep
 # the libraries quiet: httpx and APScheduler would otherwise log every single check.
@@ -51,10 +57,16 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
     return JSONResponse(status_code=422, content={"detail": format_errors(exc.errors())})
 
 
-@app.get("/", include_in_schema=False)
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 def dashboard():
     """Serve the monitoring dashboard web page."""
     return FileResponse(_INDEX_HTML)
+
+
+@app.api_route("/favicon.ico", methods=["GET", "HEAD"], include_in_schema=False)
+def favicon():
+    """Serve the tab icon for direct browser requests."""
+    return Response(content=_FAVICON_SVG, media_type="image/svg+xml")
 
 
 @app.get("/health", tags=["system"])

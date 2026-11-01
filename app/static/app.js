@@ -61,7 +61,18 @@ function buildTargetRow(item) {
 
   const hostTd = document.createElement("td");
   hostTd.className = "target-host";
-  hostTd.textContent = item.host_or_url;
+  const url = String(item.host_or_url || "");
+  if (item.check_type === "http" && (url.startsWith("http://") || url.startsWith("https://"))) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.className = "target-link";
+    link.textContent = url;
+    hostTd.appendChild(link);
+  } else {
+    hostTd.textContent = url;
+  }
 
   const typeTd = document.createElement("td");
   const typeBadge = document.createElement("span");
@@ -113,17 +124,39 @@ function setConnectionState(online, errorMessage = "") {
   const pill = document.getElementById("api-status");
   const errorBanner = document.getElementById("api-error");
 
-  if (online) {
-    pill.className = "connection-pill connection-online";
-    pill.textContent = "API Connected";
-    errorBanner.hidden = true;
-    errorBanner.textContent = "";
-  } else {
-    pill.className = "connection-pill connection-offline";
-    pill.textContent = "API Disconnected";
-    errorBanner.textContent = errorMessage || "Could not load targets from the API.";
-    errorBanner.hidden = false;
+  if (pill) {
+    if (online) {
+      pill.className = "connection-pill connection-online";
+      pill.textContent = "API Connected";
+    } else {
+      pill.className = "connection-pill connection-offline";
+      pill.textContent = "API Disconnected";
+    }
   }
+
+  if (errorBanner) {
+    if (online) {
+      errorBanner.hidden = true;
+      errorBanner.textContent = "";
+    } else {
+      errorBanner.textContent = errorMessage || "Could not load targets from the API.";
+      errorBanner.hidden = false;
+    }
+  }
+}
+
+let pollTimerId = null;
+
+function schedulePoll() {
+  if (pollTimerId !== null) {
+    clearTimeout(pollTimerId);
+  }
+  pollTimerId = setTimeout(async () => {
+    if (!document.hidden) {
+      await loadDashboard();
+    }
+    schedulePoll();
+  }, POLL_INTERVAL_MS);
 }
 
 async function loadDashboard() {
@@ -182,20 +215,22 @@ async function loadDashboard() {
 
 document.addEventListener("DOMContentLoaded", () => {
   const refreshBtn = document.getElementById("refresh-btn");
-  refreshBtn.addEventListener("click", () => {
-    loadDashboard();
-  });
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", async () => {
+      await loadDashboard();
+      schedulePoll();
+    });
+  }
 
-  loadDashboard();
-  setInterval(() => {
-    if (!document.hidden) {
-      loadDashboard();
-    }
-  }, POLL_INTERVAL_MS);
+  loadDashboard().then(() => {
+    schedulePoll();
+  });
 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
-      loadDashboard();
+      loadDashboard().then(() => {
+        schedulePoll();
+      });
     }
   });
 });

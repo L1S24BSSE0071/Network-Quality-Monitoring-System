@@ -18,6 +18,22 @@ def test_dashboard_root_serves_html_layout(client):
     assert 'id="targets-tbody"' in html
     assert 'id="refresh-btn"' in html
 
+    head_resp = client.head("/")
+    assert head_resp.status_code == 200
+    assert "text/html" in head_resp.headers["content-type"]
+
+
+def test_favicon_route_serves_svg(client):
+    response = client.get("/favicon.ico")
+    assert response.status_code == 200
+    assert "image/svg+xml" in response.headers["content-type"]
+    assert "<svg" in response.text
+    assert "#1f3a5f" in response.text
+
+    head_resp = client.head("/favicon.ico")
+    assert head_resp.status_code == 200
+    assert "image/svg+xml" in head_resp.headers["content-type"]
+
 
 def test_dashboard_static_assets_are_served(client):
     css_resp = client.get("/static/styles.css")
@@ -27,6 +43,7 @@ def test_dashboard_static_assets_are_served(client):
     assert ".badge-warning" in css_resp.text
     assert ".badge-critical" in css_resp.text
     assert ".badge-unknown" in css_resp.text
+    assert ".target-link" in css_resp.text
 
     js_resp = client.get("/static/app.js")
     assert js_resp.status_code == 200
@@ -35,6 +52,8 @@ def test_dashboard_static_assets_are_served(client):
     assert "loadDashboard" in js_resp.text
     assert "renderTargets" in js_resp.text
     assert "AbortController" in js_resp.text
+    assert "target-link" in js_resp.text
+    assert "schedulePoll" in js_resp.text
 
 
 def test_static_missing_file_returns_404(client):
