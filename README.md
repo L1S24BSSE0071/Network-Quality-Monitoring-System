@@ -1,8 +1,8 @@
 # Network Quality Monitoring System
 
-A small monitoring system that checks whether chosen websites and servers are reachable, records how fast they respond, and (in later weeks) raises warning and critical events when thresholds are crossed. Built with Python, FastAPI and SQLite.
+A small monitoring system that checks whether chosen websites and servers are reachable, records how fast they respond, and raises warning, critical and recovery events when configurable thresholds are crossed. Built with Python, FastAPI and SQLite.
 
-> **Status: Week 1 complete (foundation and data model); Week 2 in progress.** Targets can be managed through the API, checks run automatically in the background and results are stored. Alerting events, summaries and the dashboard are still to come.
+> **Status: Week 2 complete (automatic checks and alerting).** Targets are checked automatically in the background, latency thresholds (`warning`, `critical`, `recovered`) are evaluated on every check, state-change events are logged, and API endpoints expose check history, event logs and uptime summaries. The browser dashboard comes in Week 3.
 
 ## Authorization and scope
 
@@ -16,8 +16,8 @@ Only your own systems and publicly available websites should be monitored. Every
 | HTTP check with timeout, response-time measurement and error handling | Done |
 | Manual check on demand, stored in the database | Done |
 | Scheduled background checks at each target's own interval | Done |
-| Warning / critical / recovery events | Week 2 |
-| Uptime, history and summary endpoints | Week 2 |
+| Warning / critical / recovery events | Done |
+| Uptime, history and summary endpoints | Done |
 | Web dashboard with latency chart | Week 3 |
 | CSV report export | Week 3 |
 
@@ -72,11 +72,15 @@ When the server starts, every enabled target is checked in the background at its
 |--------|------|-------------|
 | POST | `/targets` | Add a target |
 | GET | `/targets` | List targets |
+| GET | `/targets/summaries?hours=24` | Status, latest check and uptime summary for all targets (optional `hours` window) |
 | GET | `/targets/{id}` | Get one target |
+| GET | `/targets/{id}/summary?hours=24` | Status, latest check and uptime summary for one target (optional `hours` window) |
 | PATCH | `/targets/{id}` | Edit a target (only the fields you send change) |
 | DELETE | `/targets/{id}` | Delete a target with its results and events |
-| POST | `/targets/{id}/check` | Run one check now and store the result |
-| GET | `/targets/{id}/results?limit=50` | Stored check results, newest first |
+| POST | `/targets/{id}/check` | Run one check now, store the result and evaluate thresholds |
+| GET | `/targets/{id}/results?limit=50&hours=24` | Stored check results, newest first (optional `hours` window) |
+| GET | `/targets/{id}/events?limit=50&severity=critical` | State-change events for one target, newest first |
+| GET | `/events?limit=50&severity=critical&target_id=1` | State-change events across all targets, newest first |
 | GET | `/health` | Confirm the API is running |
 
 ### Target fields
@@ -102,8 +106,10 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/targets `
 # Run a check on it (use the id returned above)
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/targets/1/check
 
-# See stored results
+# See stored results, summary and state-change events
 Invoke-RestMethod -Uri http://127.0.0.1:8000/targets/1/results
+Invoke-RestMethod -Uri http://127.0.0.1:8000/targets/1/summary
+Invoke-RestMethod -Uri http://127.0.0.1:8000/targets/1/events
 ```
 
 A failed check (timeout, DNS failure, refused connection, certificate error, HTTP 400 or above) is still stored, with `is_up: false` and an `error_message`.
@@ -135,14 +141,16 @@ app/
   schemas.py       Input validation rules and response shapes
   errors.py        Readable validation error messages
   checker.py       HTTP check and result storage
+  evaluator.py     Threshold evaluation, state-change events and uptime calculation
   scheduler.py     Background scheduler (APScheduler)
   routers/
-    targets.py     Target, check and results endpoints
+    targets.py     Target, check, history, event and summary endpoints
 tests/             Automated tests (pytest)
 docs/
   requirements.md  Requirements and scope
   design.md        Architecture, ER and state diagrams
   week1-review.md  Week 1 review notes
+  week2-review.md  Week 2 review notes
 requirements.txt   Pinned dependencies
 ```
 
@@ -151,10 +159,10 @@ requirements.txt   Pinned dependencies
 - [Requirements and scope](docs/requirements.md)
 - [System design and diagrams](docs/design.md)
 - [Week 1 review notes](docs/week1-review.md)
+- [Week 2 review notes](docs/week2-review.md)
 
 ## Known limitations
 
 - Ping checks are not implemented yet; a ping target returns HTTP 501 when checked.
-- Events (warning, critical, recovered) and uptime summaries are not implemented yet.
 - A refused connection can take about 3 seconds to report on Windows because the operating system retries.
 - SQLite is intended for a prototype, not heavy production load.
