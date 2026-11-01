@@ -67,6 +67,17 @@ def state_from_last_severity(last_severity: Optional[str]) -> TargetState:
     return "normal"
 
 
+def calculate_uptime_pct(total_checks: int, up_checks: int) -> Optional[float]:
+    """Return uptime percentage (0.0-100.0) rounded to 2 decimal places, or None if no checks."""
+    if type(total_checks) is not int or type(up_checks) is not int:
+        raise ValueError("total_checks and up_checks must be whole numbers")
+    if total_checks < 0 or up_checks < 0 or up_checks > total_checks:
+        raise ValueError("0 <= up_checks <= total_checks must hold")
+    if total_checks == 0:
+        return None
+    return round((up_checks / total_checks) * 100.0, 2)
+
+
 def evaluate_state(
     is_up: bool,
     latency_ms: Optional[float],

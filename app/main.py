@@ -36,6 +36,7 @@ app = FastAPI(
 )
 
 app.include_router(targets.router)
+app.include_router(targets.events_router)
 
 
 @app.exception_handler(RequestValidationError)
